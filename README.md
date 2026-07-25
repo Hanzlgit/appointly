@@ -187,8 +187,8 @@ PAT 需要 `read:packages` 权限。
 cd /opt/appointly/deploy
 export IMAGE_TAG=latest
 docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml exec web python manage.py migrate
-docker compose -f docker-compose.prod.yml exec web python manage.py createsuperuser
+docker compose -f docker-compose.prod.yml exec web uv run python manage.py migrate
+docker compose -f docker-compose.prod.yml exec web uv run python manage.py createsuperuser
 ```
 
 #### 6. 配置部署 SSH 密钥

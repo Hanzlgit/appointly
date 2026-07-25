@@ -83,4 +83,4 @@ jobs:
             export IMAGE_TAG
             docker compose -f deploy/docker-compose.prod.yml pull
             docker compose -f deploy/docker-compose.prod.yml up -d
-            docker compose -f deploy/docker-compose.prod.yml exec -T web python manage.py migrate --noinput
+            docker compose -f deploy/docker-compose.prod.yml exec -T web uv run python manage.py migrate --noinput
