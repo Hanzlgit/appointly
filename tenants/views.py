@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from tenants.models import Tenant, TenantScopedRecord
-from tenants.permissions import RequiresTenantMembership
+from tenants.permissions import RequiresTenantAdmin, RequiresTenantMembership
 
 
 class TenantContextMixin:
@@ -57,7 +57,7 @@ class TenantMembershipView(TenantContextMixin, APIView):
 
 
 class TenantScopedRecordView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership]
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
 
     def get(self, request, *args, **kwargs):
         tenant = self.get_tenant()

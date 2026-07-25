@@ -9,6 +9,7 @@ dependencies = [
     "django==5.2.4",
     "django-cors-headers==4.7.0",
     "djangorestframework==3.16.0",
+    "djangorestframework-simplejwt==5.5.0",
     "drf-spectacular==0.28.0",
     "gunicorn==23.0.0",
     "mysqlclient==2.2.7",
@@ -28,7 +29,7 @@ package = false
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["appointly", "config", "tenants", "tests"]
+src = ["accounts", "appointly", "config", "tenants", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
