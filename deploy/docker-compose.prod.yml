@@ -1,0 +1,135 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - staticfiles:/app/staticfiles:ro
+    depends_on:
+      web:
+        condition: service_started
+
+  web:
+    image: ghcr.io/hanzlgit/appointly:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - staticfiles:/app/staticfiles
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: >
+      uv run gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers 3
+      --access-logfile -
+      --error-logfile -
+
+  celery-worker:
+    image: ghcr.io/hanzlgit/appointly:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: uv run celery -A config worker -l info
+
+  celery-beat:
+    image: ghcr.io/hanzlgit/appointly:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: uv run celery -A config beat -l info
+
+  mysql:
+    image: mysql:8.4.5
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-appointly}
+      MYSQL_USER: ${MYSQL_USER:-appointly}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/backup-mysql.sh:/usr/local/bin/backup-mysql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u${MYSQL_USER:-appointly}", "-p${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    image: redis:7.4.2-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4.0.9-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-appointly}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  backup:
+    image: mysql:8.4.5
+    restart: unless-stopped
+    profiles: ["backup"]
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: ${MYSQL_USER:-appointly}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-appointly}
+      BACKUP_DIR: /backups
+    volumes:
+      - mysql_backups:/backups
+      - ./scripts/backup-mysql.sh:/usr/local/bin/backup-mysql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command: >
+      while true; do
+        /usr/local/bin/backup-mysql;
+        sleep 86400;
+      done
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  mysql_backups:
+  redis_data:
+  rabbitmq_data:
+  staticfiles:

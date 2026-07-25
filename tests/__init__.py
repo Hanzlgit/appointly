@@ -1,0 +1,1 @@
+"""Appointly test suite."""

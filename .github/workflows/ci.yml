@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4.5
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: appointly_test
+          MYSQL_USER: appointly
+          MYSQL_PASSWORD: appointly
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uappointly -pappointly"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+          --health-start-period=30s
+      redis:
+        image: redis:7.4.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=3s
+          --health-retries=5
+
+    env:
+      DATABASE_URL: mysql://appointly:appointly@127.0.0.1:3306/appointly_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      CELERY_BROKER_URL: memory://
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+      CELERY_TASK_ALWAYS_EAGER: "true"
+      DJANGO_SECRET_KEY: ci-secret-key
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: localhost
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-libmysqlclient-dev pkg-config
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Ruff check
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Run migrations
+        run: uv run python manage.py migrate --noinput
+
+      - name: Run tests
+        run: uv run python manage.py test

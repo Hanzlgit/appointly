@@ -1,0 +1,42 @@
+[project]
+name = "appointly"
+version = "0.1.0"
+description = "通用多租户预约 SaaS"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "celery==5.5.3",
+    "django==5.2.4",
+    "django-cors-headers==4.7.0",
+    "djangorestframework==3.16.0",
+    "drf-spectacular==0.28.0",
+    "gunicorn==23.0.0",
+    "mysqlclient==2.2.7",
+    "redis==6.2.0",
+    "sentry-sdk[django]==2.32.0",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit==4.2.0",
+    "ruff==0.12.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["appointly", "config", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
