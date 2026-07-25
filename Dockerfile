@@ -1,4 +1,5 @@
-FROM python:3.12-slim-bookworm AS base
+# AWS Public ECR mirrors Docker Hub; more reliable from GitHub Actions than registry-1.docker.io
+FROM public.ecr.aws/docker/library/python:3.12-slim-bookworm AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
