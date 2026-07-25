@@ -64,7 +64,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "appointly",
-    "tenants",
+    "tenants.apps.TenantsConfig",
 ]
 
 MIDDLEWARE = [

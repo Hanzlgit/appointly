@@ -12,6 +12,8 @@ class Tenant(models.Model):
 
     class Meta:
         ordering = ["name"]
+        verbose_name = "租户"
+        verbose_name_plural = "租户"
 
     def __str__(self) -> str:
         return self.name
@@ -35,9 +37,12 @@ class TenantMembership(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "user"], name="unique_tenant_user_membership"
+                fields=["tenant", "user"],
+                name="unique_tenant_user_membership",
             ),
         ]
+        verbose_name = "租户成员"
+        verbose_name_plural = "租户成员"
 
     def __str__(self) -> str:
         return f"{self.user} @ {self.tenant} ({self.role})"
