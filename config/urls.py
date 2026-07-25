@@ -25,4 +25,5 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api/v1/", include("appointly.urls")),
+    path("api/v1/<slug:tenant_slug>/", include("tenants.urls")),
 ]

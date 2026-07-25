@@ -7,6 +7,21 @@ from django.core.management.utils import get_random_secret_key
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
+def _load_dotenv(path: Path) -> None:
+    if not path.exists():
+        return
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+_load_dotenv(BASE_DIR / ".env")
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
@@ -49,6 +64,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "appointly",
+    "tenants",
 ]
 
 MIDDLEWARE = [
