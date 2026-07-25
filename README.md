@@ -120,9 +120,9 @@ PR 和 push 到 `main` 会触发 [`.github/workflows/ci.yml`](.github/workflows/
 
 #### 3. 发布流程
 
-1. 合并代码到 `main` → 自动构建镜像推送到 `ghcr.io/hanzlgit/appointly`
-2. 创建版本 Tag（如 `v0.1.0`）或在 Actions 中手动触发 **Build and Deploy** workflow
-3. `production` 环境审批通过后，自动 SSH 到服务器执行 `docker compose pull && up -d && migrate`
+1. 合并代码到 `main` → 自动构建镜像并部署到 VPS
+2. 若开启了 **production** 环境的 Required reviewers，需审批后才会执行 deploy
+3. 也可手动触发 **Build and Deploy** workflow，或打版本 Tag（如 `v0.1.0`）触发部署
 
 ## 云服务器部署
 
