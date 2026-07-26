@@ -1,10 +1,12 @@
-"""预约相关审计记录桩（完整审计见 issue 12）。"""
+"""预约相关审计记录（委托 audit 应用）。"""
 
 from __future__ import annotations
 
 from typing import Any
 
-_AUDIT_ENTRIES: list[dict[str, Any]] = []
+from audit.services.audit_log import audit_log_record
+from django.contrib.auth.models import User
+from tenants.models import Tenant
 
 
 def scheduling_audit_record(
@@ -15,6 +17,10 @@ def scheduling_audit_record(
     target_type: str,
     target_id: int,
     details: dict[str, Any] | None = None,
+    before_value: dict[str, Any] | None = None,
+    after_value: dict[str, Any] | None = None,
+    request_id: str = "",
+    ip_address: str | None = None,
 ) -> None:
     """记录一条不可变审计条目。
 
@@ -25,16 +31,24 @@ def scheduling_audit_record(
         target_type (str): 目标对象类型。
         target_id (int): 目标对象 ID。
         details (dict[str, Any] | None): 附加详情。
+        before_value (dict[str, Any] | None): 变更前值。
+        after_value (dict[str, Any] | None): 变更后值。
+        request_id (str): 关联请求 ID。
+        ip_address (str | None): 客户端 IP。
     """
-    _AUDIT_ENTRIES.append(
-        {
-            "tenant_id": tenant_id,
-            "operator_id": operator_id,
-            "action": action,
-            "target_type": target_type,
-            "target_id": target_id,
-            "details": details or {},
-        }
+    tenant = Tenant.objects.get(pk=tenant_id)
+    operator = User.objects.get(pk=operator_id)
+    audit_log_record(
+        tenant=tenant,
+        operator=operator,
+        request_id=request_id,
+        ip_address=ip_address,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        before_value=before_value,
+        after_value=after_value,
+        details=details,
     )
 
 
@@ -47,11 +61,30 @@ def scheduling_audit_list(*, tenant_id: int | None = None) -> list[dict[str, Any
     Returns:
         list[dict[str, Any]]: 审计条目副本列表。
     """
-    if tenant_id is None:
-        return list(_AUDIT_ENTRIES)
-    return [entry for entry in _AUDIT_ENTRIES if entry["tenant_id"] == tenant_id]
+    from audit.models import AuditLog
+
+    queryset = AuditLog.objects.all().order_by("id")
+    if tenant_id is not None:
+        queryset = queryset.filter(tenant_id=tenant_id)
+    return [
+        {
+            "tenant_id": entry.tenant_id,
+            "operator_id": entry.operator_id,
+            "action": entry.action,
+            "target_type": entry.target_type,
+            "target_id": entry.target_id,
+            "before_value": entry.before_value,
+            "after_value": entry.after_value,
+            "details": entry.details,
+            "request_id": entry.request_id,
+        }
+        for entry in queryset
+    ]
 
 
 def scheduling_audit_clear_for_tests() -> None:
-    """清空内存审计条目，仅测试使用。"""
-    _AUDIT_ENTRIES.clear()
+    """清空审计条目，仅测试使用。"""
+    from audit.models import AuditLog
+
+    AuditLog.objects.all().delete()
+

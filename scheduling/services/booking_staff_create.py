@@ -172,6 +172,10 @@ def scheduling_booking_staff_create(
             contact_phone=contact_phone,
         )
 
+        resolved_phone = contact_phone.strip()
+        if not resolved_phone and hasattr(customer.user, "customer_profile"):
+            resolved_phone = customer.user.customer_profile.phone
+
         scheduling_audit_record(
             tenant_id=tenant.id,
             operator_id=operator.id,
@@ -181,7 +185,7 @@ def scheduling_booking_staff_create(
             details={
                 "customer_id": customer.id,
                 "time_slot_id": time_slot_id,
-                "contact_phone": contact_phone.strip(),
+                "contact_phone": resolved_phone,
                 "skipped_contact_otp": True,
             },
         )

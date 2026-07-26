@@ -18,6 +18,8 @@ def scheduling_timeslot_capacity_adjust(
     capacity: int,
     reason: str,
     operator: User,
+    request_id: str = "",
+    ip_address: str | None = None,
 ) -> TimeSlot:
     """管理员显式调整固定时段容量并记录原因。
 
@@ -56,10 +58,10 @@ def scheduling_timeslot_capacity_adjust(
             action="capacity_adjust",
             target_type="time_slot",
             target_id=locked.id,
-            details={
-                "old_capacity": old_capacity,
-                "new_capacity": capacity,
-                "reason": normalized_reason,
-            },
+            before_value={"capacity": old_capacity},
+            after_value={"capacity": capacity},
+            details={"reason": normalized_reason},
+            request_id=request_id,
+            ip_address=ip_address,
         )
         return locked

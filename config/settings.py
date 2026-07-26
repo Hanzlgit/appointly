@@ -94,6 +94,7 @@ INSTALLED_APPS = [
     "catalog.apps.CatalogConfig",
     "scheduling.apps.SchedulingConfig",
     "notifications.apps.NotificationsConfig",
+    "audit.apps.AuditConfig",
 ]
 
 MIDDLEWARE = [

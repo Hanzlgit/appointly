@@ -1,5 +1,8 @@
 from appointly.api.envelope import api_response
 from appointly.api.openapi import enveloped_response_serializer
+from audit.constants import AuditAction
+from audit.services.audit_log import audit_log_booking_status_change, audit_log_record
+from audit.services.http_context import audit_http_context
 from catalog.models import Location, Resource
 from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import extend_schema
@@ -8,6 +11,7 @@ from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from tenants.models import TenantRole
 from tenants.permissions import (
     RequiresTenantAdmin,
     RequiresTenantCustomer,
@@ -263,6 +267,10 @@ class ScheduleRuleUpdateView(TenantContextMixin, APIView):
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
+        before_value = {
+            "capacity": rule.capacity,
+            "is_active": rule.is_active,
+        }
         try:
             rule = scheduling_schedule_rule_update(
                 tenant=tenant,
@@ -278,6 +286,23 @@ class ScheduleRuleUpdateView(TenantContextMixin, APIView):
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
+
+        http_context = audit_http_context(request=request)
+        audit_log_record(
+            tenant=tenant,
+            operator=http_context["operator"],
+            request_id=http_context["request_id"],
+            ip_address=http_context["ip_address"],
+            action=AuditAction.SCHEDULE_CHANGE,
+            target_type="schedule_rule",
+            target_id=rule.id,
+            before_value=before_value,
+            after_value={
+                "capacity": rule.capacity,
+                "is_active": rule.is_active,
+            },
+            details={"effective_date": str(validated_data["effective_date"])},
+        )
 
         response_serializer = ScheduleRuleResponseSerializer(
             scheduling_schedule_rule_to_dict(rule=rule)
@@ -635,9 +660,18 @@ class BookingConfirmView(TenantContextMixin, APIView):
             raise NotFound("预约不存在。") from exc
 
         try:
+            old_status = booking.status
             booking = scheduling_booking_confirm(booking=booking)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
+
+        audit_log_booking_status_change(
+            tenant=tenant,
+            booking_id=booking.id,
+            old_status=old_status,
+            new_status=booking.status,
+            request=request,
+        )
 
         response_serializer = BookingResponseSerializer(
             scheduling_booking_to_dict(tenant=tenant, booking=booking)
@@ -669,9 +703,18 @@ class BookingRejectView(TenantContextMixin, APIView):
             raise NotFound("预约不存在。") from exc
 
         try:
+            old_status = booking.status
             booking = scheduling_booking_reject(booking=booking)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
+
+        audit_log_booking_status_change(
+            tenant=tenant,
+            booking_id=booking.id,
+            old_status=old_status,
+            new_status=booking.status,
+            request=request,
+        )
 
         response_serializer = BookingResponseSerializer(
             scheduling_booking_to_dict(tenant=tenant, booking=booking)
@@ -880,6 +923,17 @@ class StaffBookingListCreateView(TenantContextMixin, APIView):
             user=request.user,
             role=role,
         )
+        if role == TenantRole.TENANT_ADMIN and bookings:
+            audit_log_record(
+                tenant=tenant,
+                operator=request.user,
+                request_id=getattr(request, "request_id", ""),
+                ip_address=request.META.get("REMOTE_ADDR"),
+                action=AuditAction.SENSITIVE_VIEW,
+                target_type="booking_list",
+                target_id=0,
+                details={"booking_count": len(bookings)},
+            )
         response_serializer = StaffBookingListResponseSerializer(
             {
                 "bookings": [
@@ -976,9 +1030,18 @@ class BookingCompleteView(TenantContextMixin, APIView):
             raise NotFound("预约不存在。") from exc
 
         try:
+            old_status = booking.status
             booking = scheduling_booking_complete(booking=booking)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
+
+        audit_log_booking_status_change(
+            tenant=tenant,
+            booking_id=booking.id,
+            old_status=old_status,
+            new_status=booking.status,
+            request=request,
+        )
 
         response_serializer = StaffBookingResponseSerializer(
             scheduling_booking_to_dict(
@@ -1015,9 +1078,18 @@ class BookingNoShowView(TenantContextMixin, APIView):
             raise NotFound("预约不存在。") from exc
 
         try:
+            old_status = booking.status
             booking = scheduling_booking_no_show(booking=booking)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
+
+        audit_log_booking_status_change(
+            tenant=tenant,
+            booking_id=booking.id,
+            old_status=old_status,
+            new_status=booking.status,
+            request=request,
+        )
 
         response_serializer = StaffBookingResponseSerializer(
             scheduling_booking_to_dict(
@@ -1061,12 +1133,15 @@ class TimeSlotCapacityAdjustView(TenantContextMixin, APIView):
         validated_data = request_serializer.validated_data
 
         try:
+            http_context = audit_http_context(request=request)
             time_slot = scheduling_timeslot_capacity_adjust(
                 tenant=tenant,
                 time_slot=time_slot,
                 capacity=validated_data["capacity"],
                 reason=validated_data["reason"],
                 operator=request.user,
+                request_id=http_context["request_id"],
+                ip_address=http_context["ip_address"],
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
