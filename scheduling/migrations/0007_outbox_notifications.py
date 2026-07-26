@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('scheduling', '0006_booking_completed_no_show'),
+        ("scheduling", "0006_booking_completed_no_show"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='tenantbookingsettings',
-            name='reminder_minutes_before',
+            model_name="tenantbookingsettings",
+            name="reminder_minutes_before",
             field=models.PositiveIntegerField(default=60),
         ),
     ]

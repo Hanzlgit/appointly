@@ -361,9 +361,7 @@ class AuditDashboardTests(APITestCase):
             {"date": "2026-07-26", "location_id": self.location.id},
         )
         data = api_data(response)
-        location_counts = {
-            row["location_id"]: row["count"] for row in data["bookings_by_location"]
-        }
+        location_counts = {row["location_id"]: row["count"] for row in data["bookings_by_location"]}
         self.assertEqual(location_counts.get(self.location.id), 1)
         self.assertNotIn(self.other_location.id, location_counts)
 

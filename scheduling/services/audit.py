@@ -87,4 +87,3 @@ def scheduling_audit_clear_for_tests() -> None:
     from audit.models import AuditLog
 
     AuditLog.objects.all().delete()
-
