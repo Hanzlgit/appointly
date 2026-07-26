@@ -71,15 +71,25 @@ uv run ruff format --check .
 uv run python manage.py test
 ```
 
-### 7. Celery（可选，需 RabbitMQ 已启动）
+### 7. Celery 与 Outbox（可选，需 RabbitMQ 已启动）
+
+本地默认 `OUTBOX_MESSAGE_BROKER=mock`，Outbox 消息写入内存代理，测试里可手动或调用 `outbox_consumer_process_mock_pending()` 消费。
+
+生产环境设置 `OUTBOX_MESSAGE_BROKER=rabbitmq` 后需同时运行 **发布端** 与 **消费端**：
 
 ```powershell
-# 终端 1
+# 终端 1 — Celery worker（执行异步任务）
 uv run celery -A config worker -l info
 
-# 终端 2
+# 终端 2 — Celery beat（定时发布未投递 Outbox 到 RabbitMQ）
 uv run celery -A config beat -l info
+
+# 终端 3 — Outbox 消费者（订阅 appointly.outbox，幂等处理通知）
+# 仅 OUTBOX_MESSAGE_BROKER=rabbitmq 时可用
+uv run python manage.py consume_outbox_events
 ```
+
+生产 Compose（`deploy/docker-compose.prod.yml`）已包含 `celery-beat`（publisher）与 `outbox-consumer` 服务。
 
 ## GitHub 配置
 
@@ -126,7 +136,7 @@ PR 和 push 到 `main` 会触发 [`.github/workflows/ci.yml`](.github/workflows/
 
 ## 云服务器部署
 
-目标：Linux 服务器，Docker Compose 运行 Nginx + Gunicorn + Celery + MySQL + Redis + RabbitMQ。
+目标：Linux 服务器，Docker Compose 运行 Nginx + Gunicorn + Celery + Outbox 消费者 + MySQL + Redis + RabbitMQ。
 
 ### 你需要做的（一次性）
 

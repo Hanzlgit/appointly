@@ -60,6 +60,18 @@ services:
         condition: service_healthy
     command: uv run celery -A config beat -l info
 
+  outbox-consumer:
+    image: ghcr.io/hanzlgit/appointly:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    command: uv run python manage.py consume_outbox_events
+
   mysql:
     image: mysql:8.4.5
     restart: unless-stopped
