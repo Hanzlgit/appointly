@@ -97,10 +97,15 @@ class TimeSlot(models.Model):
 
 
 class Booking(models.Model):
-    """最小预约模型，供排班冲突检测使用。"""
+    """客户预约记录。"""
 
     tenant = models.ForeignKey(
         "tenants.Tenant",
+        on_delete=models.CASCADE,
+        related_name="bookings",
+    )
+    customer = models.ForeignKey(
+        "tenants.TenantCustomer",
         on_delete=models.CASCADE,
         related_name="bookings",
     )
@@ -109,12 +114,25 @@ class Booking(models.Model):
         on_delete=models.CASCADE,
         related_name="bookings",
     )
+    service = models.ForeignKey(
+        "catalog.Service",
+        on_delete=models.PROTECT,
+        related_name="bookings",
+    )
     status = models.CharField(max_length=16, choices=BookingStatus.choices)
+    party_size = models.PositiveIntegerField(default=1)
+    idempotency_key = models.CharField(max_length=128)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "customer", "idempotency_key"],
+                name="unique_booking_idempotency_per_customer",
+            ),
+        ]
         verbose_name = "预约"
         verbose_name_plural = "预约"
 

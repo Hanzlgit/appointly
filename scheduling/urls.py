@@ -4,6 +4,16 @@ from scheduling import views
 
 urlpatterns = [
     path(
+        "availability/",
+        views.AvailabilityQueryView.as_view(),
+        name="scheduling-availability",
+    ),
+    path(
+        "bookings/",
+        views.BookingListCreateView.as_view(),
+        name="scheduling-bookings",
+    ),
+    path(
         "rules/",
         views.ScheduleRuleListCreateView.as_view(),
         name="scheduling-rules",

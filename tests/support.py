@@ -1,5 +1,9 @@
 """Test helpers for API envelope responses."""
 
+from catalog.models import Service
+from scheduling.models import Booking, BookingStatus
+from tenants.models import Tenant, TenantCustomer
+
 
 def response_body(response) -> dict:
     """解析 HTTP 响应 JSON  body。
@@ -49,3 +53,52 @@ def api_code(response) -> int:
         int: 响应体中的业务码。
     """
     return response_body(response)["code"]
+
+
+def booking_create_for_test(
+    *,
+    tenant: Tenant,
+    time_slot,
+    party_size: int = 1,
+    status: str = BookingStatus.CONFIRMED,
+    idempotency_key: str = "test-booking",
+    service: Service | None = None,
+    customer: TenantCustomer | None = None,
+) -> Booking:
+    """创建满足当前模型约束的测试预约。
+
+    Args:
+        tenant (Tenant): 所属租户。
+        time_slot: 固定时段实例。
+        party_size (int): 预约人数。
+        status (str): 预约状态。
+        idempotency_key (str): 幂等键。
+        service (Service | None): 服务项目；省略时使用租户首个服务。
+        customer (TenantCustomer | None): 客户档案；省略时自动创建。
+
+    Returns:
+        Booking: 新建的预约实例。
+    """
+    if service is None:
+        service = Service.objects.filter(tenant=tenant).first()
+        if service is None:
+            service = Service.objects.create(
+                tenant=tenant,
+                name="Test Service",
+                duration_minutes=60,
+            )
+    if customer is None:
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_user(username=f"test-customer-{idempotency_key}")
+        customer = TenantCustomer.objects.create(tenant=tenant, user=user)
+
+    return Booking.objects.create(
+        tenant=tenant,
+        customer=customer,
+        time_slot=time_slot,
+        service=service,
+        status=status,
+        party_size=party_size,
+        idempotency_key=idempotency_key,
+    )

@@ -82,3 +82,66 @@ class TimeSlotBatchCloseResponseSerializer(serializers.Serializer):
 
 class TimeSlotBatchCloseConflictResponseSerializer(serializers.Serializer):
     conflicts = serializers.ListField(child=serializers.IntegerField())
+
+
+class AvailabilityQueryRequestSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    resource_id = serializers.IntegerField(required=False, allow_null=True)
+    service_id = serializers.IntegerField(required=False, allow_null=True)
+    location_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class AvailabilityResourceSlotResponseSerializer(serializers.Serializer):
+    time_slot_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
+    start = serializers.CharField()
+    end = serializers.CharField()
+    capacity = serializers.IntegerField()
+    remaining_capacity = serializers.IntegerField()
+
+
+class AvailabilityAggregateItemResponseSerializer(serializers.Serializer):
+    service_id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
+    start = serializers.CharField()
+    end = serializers.CharField()
+    remaining_capacity = serializers.IntegerField()
+
+
+class AvailabilityResourceQueryResponseSerializer(serializers.Serializer):
+    mode = serializers.CharField()
+    slots = AvailabilityResourceSlotResponseSerializer(many=True)
+
+
+class AvailabilityAggregateQueryResponseSerializer(serializers.Serializer):
+    mode = serializers.CharField()
+    availability = AvailabilityAggregateItemResponseSerializer(many=True)
+
+
+class BookingCreateRequestSerializer(serializers.Serializer):
+    time_slot_id = serializers.IntegerField(required=False)
+    service_id = serializers.IntegerField()
+    party_size = serializers.IntegerField(min_value=1, default=1)
+    location_id = serializers.IntegerField(required=False)
+    start = serializers.DateTimeField(required=False)
+    end = serializers.DateTimeField(required=False)
+    resource_id = serializers.IntegerField(required=False)
+
+
+class BookingResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    status = serializers.CharField()
+    party_size = serializers.IntegerField()
+    service_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
+    time_slot_id = serializers.IntegerField()
+    start = serializers.CharField()
+    end = serializers.CharField()
+    created_at = serializers.DateTimeField()
+
+
+class BookingListResponseSerializer(serializers.Serializer):
+    bookings = BookingResponseSerializer(many=True)

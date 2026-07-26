@@ -5,12 +5,12 @@ from catalog.models import Location, Resource
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APITestCase
-from scheduling.models import Booking, BookingStatus, ScheduleRule, TimeSlot, TimeSlotStatus
+from scheduling.models import BookingStatus, ScheduleRule, TimeSlot, TimeSlotStatus
 from scheduling.services.time_slot import scheduling_timeslots_generate_for_rule
 from scheduling.tasks import scheduling_generate_timeslots_for_all_tenants
 from tenants.models import Tenant, TenantMembership, TenantRole
 
-from tests.support import api_data, api_message
+from tests.support import api_data, api_message, booking_create_for_test
 
 
 class SchedulingAdminMixin:
@@ -201,10 +201,10 @@ class TimeSlotBatchCloseTests(SchedulingAdminMixin, APITestCase):
         slot_start = datetime(2026, 8, 10, 9, 0, tzinfo=tenant_tz).astimezone(UTC)
         slot_end = datetime(2026, 8, 10, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
         time_slot = self._create_open_slot(slot_start=slot_start, slot_end=slot_end)
-        booking = Booking.objects.create(
+        booking = booking_create_for_test(
             tenant=self.tenant,
             time_slot=time_slot,
-            status=BookingStatus.CONFIRMED,
+            idempotency_key="batch-close-conflict",
         )
 
         response = self.client.post(
@@ -262,10 +262,11 @@ class ScheduleRuleEffectiveDateTests(SchedulingAdminMixin, APITestCase):
             capacity=1,
             status=TimeSlotStatus.OPEN,
         )
-        Booking.objects.create(
+        booking_create_for_test(
             tenant=self.tenant,
             time_slot=time_slot,
             status=BookingStatus.PENDING,
+            idempotency_key="rule-change-conflict",
         )
 
         response = self.client.patch(

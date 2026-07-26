@@ -8,11 +8,18 @@ from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from tenants.permissions import RequiresTenantAdmin, RequiresTenantMembership
+from tenants.permissions import (
+    RequiresTenantAdmin,
+    RequiresTenantCustomer,
+    RequiresTenantMembership,
+)
+from tenants.selectors import tenant_customer_get_for_user
 from tenants.views import TenantContextMixin
 
 from scheduling.models import ScheduleRule, TimeSlot
 from scheduling.selectors import (
+    scheduling_booking_list_for_customer,
+    scheduling_booking_to_dict,
     scheduling_schedule_rule_get_for_tenant,
     scheduling_schedule_rule_list_for_tenant,
     scheduling_schedule_rule_to_dict,
@@ -20,6 +27,12 @@ from scheduling.selectors import (
     scheduling_time_slot_to_dict,
 )
 from scheduling.serializers import (
+    AvailabilityAggregateQueryResponseSerializer,
+    AvailabilityQueryRequestSerializer,
+    AvailabilityResourceQueryResponseSerializer,
+    BookingCreateRequestSerializer,
+    BookingListResponseSerializer,
+    BookingResponseSerializer,
     ScheduleRuleCreateRequestSerializer,
     ScheduleRuleListResponseSerializer,
     ScheduleRuleResponseSerializer,
@@ -30,6 +43,8 @@ from scheduling.serializers import (
     TimeSlotCreateRequestSerializer,
     TimeSlotResponseSerializer,
 )
+from scheduling.services.availability_cache import scheduling_availability_query_cached
+from scheduling.services.booking_create import scheduling_booking_create
 from scheduling.services.schedule_rule import (
     scheduling_schedule_rule_create,
     scheduling_schedule_rule_update,
@@ -347,3 +362,126 @@ class TimeSlotBatchCloseView(TenantContextMixin, APIView):
 
         response_serializer = TimeSlotBatchCloseResponseSerializer({"closed_count": closed_count})
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class AvailabilityQueryView(TenantContextMixin, APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        summary="查询可用时段",
+        parameters=[AvailabilityQueryRequestSerializer],
+        responses={
+            200: enveloped_response_serializer(AvailabilityResourceQueryResponseSerializer),
+        },
+    )
+    def get(self, request, *args, **kwargs):
+        """查询指定资源或聚合可用容量。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含可用时段或聚合容量的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        request_serializer = AvailabilityQueryRequestSerializer(data=request.query_params)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        result = scheduling_availability_query_cached(
+            tenant=tenant,
+            start=validated_data["start"],
+            end=validated_data["end"],
+            resource_id=validated_data.get("resource_id"),
+            service_id=validated_data.get("service_id"),
+            location_id=validated_data.get("location_id"),
+        )
+
+        if result["mode"] == "resource":
+            response_serializer = AvailabilityResourceQueryResponseSerializer(result)
+        else:
+            response_serializer = AvailabilityAggregateQueryResponseSerializer(result)
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingListCreateView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantCustomer]
+
+    @extend_schema(
+        summary="列出当前客户的预约",
+        responses={200: enveloped_response_serializer(BookingListResponseSerializer)},
+    )
+    def get(self, request, *args, **kwargs):
+        """列出客户在当前租户下的预约。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含预约列表的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
+        bookings = scheduling_booking_list_for_customer(tenant=tenant, customer=customer)
+        response_serializer = BookingListResponseSerializer(
+            {
+                "bookings": [
+                    BookingResponseSerializer(
+                        scheduling_booking_to_dict(tenant=tenant, booking=booking)
+                    ).data
+                    for booking in bookings
+                ],
+            }
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="创建预约",
+        request=BookingCreateRequestSerializer,
+        responses={201: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """客户创建预约，需携带 Idempotency-Key 请求头。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含新预约的标准 envelope 响应，HTTP 201。
+        """
+        idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+        if not idempotency_key:
+            raise DRFValidationError({"idempotency_key": "必须提供 Idempotency-Key 请求头。"})
+
+        tenant = self.get_tenant()
+        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
+        request_serializer = BookingCreateRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            booking = scheduling_booking_create(
+                tenant=tenant,
+                customer=customer,
+                idempotency_key=idempotency_key,
+                service_id=validated_data["service_id"],
+                party_size=validated_data.get("party_size", 1),
+                time_slot_id=validated_data.get("time_slot_id"),
+                location_id=validated_data.get("location_id"),
+                start=validated_data.get("start"),
+                end=validated_data.get("end"),
+                resource_id=validated_data.get("resource_id"),
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(
+            request,
+            data=response_serializer.data,
+            message="created",
+            status=status.HTTP_201_CREATED,
+        )
