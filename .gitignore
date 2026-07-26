@@ -17,7 +17,7 @@ build/
 
 # Django
 *.log
-local_settings.py
+config/local/settings.py
 db.sqlite3
 media/
 staticfiles/

@@ -251,6 +251,9 @@ if SENTRY_DSN:
         send_default_pii=False,
     )
 
+# 跨域白名单；生产环境在部署配置中设置，本地开发见 ``config/local/settings.example.py``。
+CORS_ALLOWED_ORIGINS: list[str] = []
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -273,3 +276,8 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+try:
+    from config.local.settings import *  # noqa: F403
+except ImportError:
+    pass
