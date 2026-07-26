@@ -91,6 +91,7 @@ INSTALLED_APPS = [
     "appointly",
     "accounts.apps.AccountsConfig",
     "tenants.apps.TenantsConfig",
+    "catalog.apps.CatalogConfig",
 ]
 
 MIDDLEWARE = [

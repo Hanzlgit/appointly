@@ -25,8 +25,11 @@ from tenants.serializers import (
     TenantScopedRecordCreateResponseSerializer,
     TenantScopedRecordListResponseSerializer,
     TenantScopedRecordResponseSerializer,
+    TenantSettingsUpdateRequestSerializer,
+    TenantSettingsUpdateResponseSerializer,
 )
 from tenants.services.tenant_scoped_record import tenant_scoped_record_create
+from tenants.services.tenant_settings import tenant_timezone_update
 
 
 class TenantContextMixin:
@@ -183,4 +186,46 @@ class TenantCustomerMeRetrieveView(TenantContextMixin, APIView):
         tenant = self.get_tenant()
         response_data = tenant_customer_me_get_for_user(tenant=tenant, user=request.user)
         response_serializer = TenantCustomerMeRetrieveResponseSerializer(response_data)
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class TenantSettingsUpdateView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="更新租户设置",
+        request=TenantSettingsUpdateRequestSerializer,
+        responses={200: enveloped_response_serializer(TenantSettingsUpdateResponseSerializer)},
+    )
+    def patch(self, request, *args, **kwargs):
+        """更新租户配置（如时区）。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后租户设置的标准 envelope 响应。
+        """
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
+        tenant = self.get_tenant()
+        request_serializer = TenantSettingsUpdateRequestSerializer(data=request.data, partial=True)
+        request_serializer.is_valid(raise_exception=True)
+
+        try:
+            tenant = tenant_timezone_update(
+                tenant=tenant,
+                timezone=request_serializer.validated_data["timezone"],
+            )
+        except DjangoValidationError as exc:
+            raise DRFValidationError(str(exc)) from exc
+
+        response_data = {
+            "slug": tenant.slug,
+            "name": tenant.name,
+            "timezone": tenant.timezone,
+            "is_active": tenant.is_active,
+        }
+        response_serializer = TenantSettingsUpdateResponseSerializer(response_data)
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)

@@ -29,7 +29,10 @@ package = false
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["accounts", "appointly", "config", "tenants", "tests"]
+src = ["accounts", "appointly", "catalog", "config", "tenants", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/migrations/*.py" = ["E501"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]

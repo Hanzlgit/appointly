@@ -38,3 +38,14 @@ class TenantCustomerMeRetrieveResponseSerializer(serializers.Serializer):
     display_name = serializers.CharField()
     notes = serializers.CharField()
     tags = serializers.JSONField()
+
+
+class TenantSettingsUpdateRequestSerializer(serializers.Serializer):
+    timezone = serializers.CharField(max_length=64)
+
+
+class TenantSettingsUpdateResponseSerializer(serializers.Serializer):
+    slug = serializers.SlugField()
+    name = serializers.CharField()
+    timezone = serializers.CharField()
+    is_active = serializers.BooleanField()
