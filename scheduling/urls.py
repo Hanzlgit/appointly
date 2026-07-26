@@ -44,6 +44,26 @@ urlpatterns = [
         name="scheduling-booking-contact",
     ),
     path(
+        "staff/bookings/",
+        views.StaffBookingListCreateView.as_view(),
+        name="scheduling-staff-bookings",
+    ),
+    path(
+        "bookings/<int:booking_id>/complete/",
+        views.BookingCompleteView.as_view(),
+        name="scheduling-booking-complete",
+    ),
+    path(
+        "bookings/<int:booking_id>/no-show/",
+        views.BookingNoShowView.as_view(),
+        name="scheduling-booking-no-show",
+    ),
+    path(
+        "time-slots/<int:time_slot_id>/capacity-adjust/",
+        views.TimeSlotCapacityAdjustView.as_view(),
+        name="scheduling-time-slot-capacity-adjust",
+    ),
+    path(
         "booking-settings/",
         views.TenantBookingSettingsView.as_view(),
         name="scheduling-booking-settings",

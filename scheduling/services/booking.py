@@ -12,10 +12,17 @@ CUSTOMER_MODIFIABLE_BOOKING_STATUSES = {
 }
 
 TERMINAL_BOOKING_STATUSES = {
+    BookingStatus.COMPLETED,
+    BookingStatus.NO_SHOW,
     BookingStatus.CANCELLED,
     BookingStatus.RESCHEDULED,
     BookingStatus.EXPIRED,
     BookingStatus.REJECTED,
+}
+
+ADMIN_COMPLETABLE_BOOKING_STATUSES = {
+    BookingStatus.CONFIRMED,
+    BookingStatus.STARTED,
 }
 
 

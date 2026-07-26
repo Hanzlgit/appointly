@@ -391,6 +391,50 @@ def scheduling_booking_party_size_update(
     return booking
 
 
+def scheduling_booking_complete(*, booking: Booking) -> Booking:
+    """管理员将预约标记为已完成。
+
+    Args:
+        booking (Booking): 目标预约。
+
+    Returns:
+        Booking: 更新后的预约。
+
+    Raises:
+        ValidationError: 当前状态不允许标记完成。
+    """
+    from scheduling.services.booking import ADMIN_COMPLETABLE_BOOKING_STATUSES
+
+    if booking.status not in ADMIN_COMPLETABLE_BOOKING_STATUSES:
+        raise ValidationError("当前预约状态不可标记为已完成。")
+
+    booking.status = BookingStatus.COMPLETED
+    booking.save(update_fields=["status", "updated_at"])
+    return booking
+
+
+def scheduling_booking_no_show(*, booking: Booking) -> Booking:
+    """管理员将预约标记为爽约。
+
+    Args:
+        booking (Booking): 目标预约。
+
+    Returns:
+        Booking: 更新后的预约。
+
+    Raises:
+        ValidationError: 当前状态不允许标记爽约。
+    """
+    from scheduling.services.booking import ADMIN_COMPLETABLE_BOOKING_STATUSES
+
+    if booking.status not in ADMIN_COMPLETABLE_BOOKING_STATUSES:
+        raise ValidationError("当前预约状态不可标记为爽约。")
+
+    booking.status = BookingStatus.NO_SHOW
+    booking.save(update_fields=["status", "updated_at"])
+    return booking
+
+
 def scheduling_booking_contact_update(
     *,
     booking: Booking,

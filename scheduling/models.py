@@ -10,6 +10,8 @@ class BookingStatus(models.TextChoices):
     PENDING = "pending", "待确认"
     CONFIRMED = "confirmed", "已确认"
     STARTED = "started", "已开始"
+    COMPLETED = "completed", "已完成"
+    NO_SHOW = "no_show", "爽约"
     CANCELLED = "cancelled", "已取消"
     RESCHEDULED = "rescheduled", "已改期"
     EXPIRED = "expired", "已过期"

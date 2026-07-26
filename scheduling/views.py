@@ -12,13 +12,15 @@ from tenants.permissions import (
     RequiresTenantAdmin,
     RequiresTenantCustomer,
     RequiresTenantMembership,
+    RequiresTenantStaffOrAdmin,
 )
-from tenants.selectors import tenant_customer_get_for_user
+from tenants.selectors import tenant_customer_get_for_user, tenant_membership_role_get_for_user
 from tenants.views import TenantContextMixin
 
 from scheduling.models import Booking, BookingCancelActor, ScheduleRule, TimeSlot
 from scheduling.selectors import (
     scheduling_booking_list_for_customer,
+    scheduling_booking_list_for_staff,
     scheduling_booking_settings_to_dict,
     scheduling_booking_to_dict,
     scheduling_schedule_rule_get_for_tenant,
@@ -42,11 +44,15 @@ from scheduling.serializers import (
     ScheduleRuleListResponseSerializer,
     ScheduleRuleResponseSerializer,
     ScheduleRuleUpdateRequestSerializer,
+    StaffBookingCreateRequestSerializer,
+    StaffBookingListResponseSerializer,
+    StaffBookingResponseSerializer,
     TenantBookingSettingsResponseSerializer,
     TenantBookingSettingsUpdateRequestSerializer,
     TimeSlotBatchCloseConflictResponseSerializer,
     TimeSlotBatchCloseRequestSerializer,
     TimeSlotBatchCloseResponseSerializer,
+    TimeSlotCapacityAdjustRequestSerializer,
     TimeSlotCreateRequestSerializer,
     TimeSlotResponseSerializer,
 )
@@ -56,15 +62,19 @@ from scheduling.services.booking_settings import (
     scheduling_booking_settings_get_for_tenant,
     scheduling_booking_settings_update,
 )
+from scheduling.services.booking_staff_create import scheduling_booking_staff_create
 from scheduling.services.booking_transition import (
     scheduling_booking_cancel,
+    scheduling_booking_complete,
     scheduling_booking_confirm,
     scheduling_booking_contact_update,
     scheduling_booking_get_for_tenant,
+    scheduling_booking_no_show,
     scheduling_booking_party_size_update,
     scheduling_booking_reject,
     scheduling_booking_reschedule,
 )
+from scheduling.services.capacity_adjust import scheduling_timeslot_capacity_adjust
 from scheduling.services.schedule_rule import (
     scheduling_schedule_rule_create,
     scheduling_schedule_rule_update,
@@ -843,5 +853,225 @@ class BookingContactUpdateView(TenantContextMixin, APIView):
 
         response_serializer = BookingResponseSerializer(
             scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class StaffBookingListCreateView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantStaffOrAdmin]
+
+    @extend_schema(
+        summary="列出后台可见预约",
+        responses={200: enveloped_response_serializer(StaffBookingListResponseSerializer)},
+    )
+    def get(self, request, *args, **kwargs):
+        """列出租户全部或工作人员关联资源的预约。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含预约列表的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        role = tenant_membership_role_get_for_user(tenant=tenant, user=request.user)
+        bookings = scheduling_booking_list_for_staff(
+            tenant=tenant,
+            user=request.user,
+            role=role,
+        )
+        response_serializer = StaffBookingListResponseSerializer(
+            {
+                "bookings": [
+                    StaffBookingResponseSerializer(
+                        scheduling_booking_to_dict(
+                            tenant=tenant,
+                            booking=booking,
+                            viewer_role=role,
+                        )
+                    ).data
+                    for booking in bookings
+                ],
+            }
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="后台代建预约",
+        request=StaffBookingCreateRequestSerializer,
+        responses={201: enveloped_response_serializer(StaffBookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """租户管理员或工作人员代建预约，需 Idempotency-Key。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含新预约的标准 envelope 响应，HTTP 201。
+        """
+        idempotency_key = request.headers.get("Idempotency-Key", "").strip()
+        if not idempotency_key:
+            raise DRFValidationError({"idempotency_key": "必须提供 Idempotency-Key 请求头。"})
+
+        tenant = self.get_tenant()
+        role = tenant_membership_role_get_for_user(tenant=tenant, user=request.user)
+        request_serializer = StaffBookingCreateRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            booking = scheduling_booking_staff_create(
+                tenant=tenant,
+                operator=request.user,
+                role=role,
+                idempotency_key=idempotency_key,
+                service_id=validated_data["service_id"],
+                party_size=validated_data.get("party_size", 1),
+                time_slot_id=validated_data["time_slot_id"],
+                customer_id=validated_data.get("customer_id"),
+                contact_name=validated_data.get("contact_name", ""),
+                contact_phone=validated_data.get("contact_phone", ""),
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = StaffBookingResponseSerializer(
+            scheduling_booking_to_dict(
+                tenant=tenant,
+                booking=booking,
+                viewer_role=role,
+            )
+        )
+        return api_response(
+            request,
+            data=response_serializer.data,
+            message="created",
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class BookingCompleteView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="标记预约已完成",
+        responses={200: enveloped_response_serializer(StaffBookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """将预约标记为 COMPLETED。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        role = tenant_membership_role_get_for_user(tenant=tenant, user=request.user)
+        booking_id = self.kwargs["booking_id"]
+        try:
+            booking = scheduling_booking_get_for_tenant(tenant=tenant, booking_id=booking_id)
+        except Booking.DoesNotExist as exc:
+            raise NotFound("预约不存在。") from exc
+
+        try:
+            booking = scheduling_booking_complete(booking=booking)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = StaffBookingResponseSerializer(
+            scheduling_booking_to_dict(
+                tenant=tenant,
+                booking=booking,
+                viewer_role=role,
+            )
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingNoShowView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="标记预约爽约",
+        responses={200: enveloped_response_serializer(StaffBookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """将预约标记为 NO_SHOW。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        role = tenant_membership_role_get_for_user(tenant=tenant, user=request.user)
+        booking_id = self.kwargs["booking_id"]
+        try:
+            booking = scheduling_booking_get_for_tenant(tenant=tenant, booking_id=booking_id)
+        except Booking.DoesNotExist as exc:
+            raise NotFound("预约不存在。") from exc
+
+        try:
+            booking = scheduling_booking_no_show(booking=booking)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = StaffBookingResponseSerializer(
+            scheduling_booking_to_dict(
+                tenant=tenant,
+                booking=booking,
+                viewer_role=role,
+            )
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class TimeSlotCapacityAdjustView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="调整固定时段容量",
+        request=TimeSlotCapacityAdjustRequestSerializer,
+        responses={200: enveloped_response_serializer(TimeSlotResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """显式调整时段容量并记录原因。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后时段的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        time_slot_id = self.kwargs["time_slot_id"]
+        try:
+            time_slot = scheduling_time_slot_get_for_tenant(
+                tenant=tenant,
+                time_slot_id=time_slot_id,
+            )
+        except TimeSlot.DoesNotExist as exc:
+            raise NotFound("固定时段不存在。") from exc
+
+        request_serializer = TimeSlotCapacityAdjustRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            time_slot = scheduling_timeslot_capacity_adjust(
+                tenant=tenant,
+                time_slot=time_slot,
+                capacity=validated_data["capacity"],
+                reason=validated_data["reason"],
+                operator=request.user,
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = TimeSlotResponseSerializer(
+            scheduling_time_slot_to_dict(time_slot=time_slot)
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)

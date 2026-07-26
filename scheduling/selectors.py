@@ -2,9 +2,10 @@ from collections import defaultdict
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from catalog.models import Service
+from catalog.models import Resource, Service
+from django.contrib.auth.models import User
 from django.db.models import Sum
-from tenants.models import Tenant
+from tenants.models import Tenant, TenantRole
 
 from scheduling.models import Booking, ScheduleRule, TimeSlot, TimeSlotStatus
 from scheduling.services.booking import ACTIVE_BOOKING_STATUSES
@@ -305,23 +306,121 @@ def scheduling_booking_settings_to_dict(*, settings) -> dict:
     }
 
 
-def scheduling_booking_to_dict(*, tenant: Tenant, booking: Booking) -> dict:
+def scheduling_phone_mask(*, phone: str) -> str:
+    """对手机号中间四位脱敏。
+
+    Args:
+        phone (str): 原始手机号。
+
+    Returns:
+        str: 脱敏后的手机号；过短则原样返回。
+    """
+    normalized = phone.strip()
+    if len(normalized) < 7:
+        return normalized
+    return f"{normalized[:3]}****{normalized[-4:]}"
+
+
+def scheduling_staff_resource_ids_for_user(*, tenant: Tenant, user: User) -> set[int]:
+    """返回工作人员关联的资源 ID 集合。
+
+    Args:
+        tenant (Tenant): 目标租户。
+        user (User): 工作人员用户。
+
+    Returns:
+        set[int]: 关联资源 ID 集合。
+    """
+    return set(
+        Resource.objects.filter(tenant=tenant, staff_user=user, is_active=True).values_list(
+            "id",
+            flat=True,
+        )
+    )
+
+
+def scheduling_booking_list_for_staff(
+    *,
+    tenant: Tenant,
+    user: User,
+    role: str,
+) -> list[Booking]:
+    """列出后台可见预约；管理员看全部，工作人员仅关联资源。
+
+    Args:
+        tenant (Tenant): 目标租户。
+        user (User): 当前用户。
+        role (str): 用户在租户下的角色。
+
+    Returns:
+        list[Booking]: 预约列表，按创建时间倒序。
+    """
+    queryset = Booking.objects.filter(tenant=tenant).select_related(
+        "time_slot",
+        "service",
+        "time_slot__resource",
+        "time_slot__location",
+        "customer__user__customer_profile",
+    )
+    if role == TenantRole.STAFF:
+        resource_ids = scheduling_staff_resource_ids_for_user(tenant=tenant, user=user)
+        queryset = queryset.filter(time_slot__resource_id__in=resource_ids)
+    return list(queryset.order_by("-created_at"))
+
+
+def scheduling_booking_phone_for_viewer(
+    *,
+    booking: Booking,
+    role: str,
+) -> tuple[str, str]:
+    """按查看者角色返回客户手机号与联系人手机号。
+
+    Args:
+        booking (Booking): 预约实例。
+        role (str): 查看者角色。
+
+    Returns:
+        tuple[str, str]: ``(customer_phone, contact_phone)``。
+    """
+    customer_phone = ""
+    if hasattr(booking.customer.user, "customer_profile"):
+        customer_phone = booking.customer.user.customer_profile.phone
+
+    contact_phone = booking.contact_phone
+    if not contact_phone:
+        contact_phone = customer_phone
+
+    if role in {TenantRole.TENANT_ADMIN, "platform_admin"}:
+        return customer_phone, contact_phone
+
+    return (
+        scheduling_phone_mask(phone=customer_phone),
+        scheduling_phone_mask(phone=contact_phone),
+    )
+
+
+def scheduling_booking_to_dict(
+    *,
+    tenant: Tenant,
+    booking: Booking,
+    viewer_role: str | None = None,
+) -> dict:
     """将预约映射为 API 响应字典。
 
     Args:
         tenant (Tenant): 目标租户（用于时区格式化）。
         booking (Booking): 预约实例。
+        viewer_role (str | None): 查看者角色，用于手机号脱敏。
 
     Returns:
         dict: 含预约字段的响应字典。
     """
     time_slot = booking.time_slot
-    return {
+    payload = {
         "id": booking.id,
         "status": booking.status,
         "party_size": booking.party_size,
         "contact_name": booking.contact_name,
-        "contact_phone": booking.contact_phone,
         "service_id": booking.service_id,
         "resource_id": time_slot.resource_id,
         "location_id": time_slot.location_id,
@@ -331,4 +430,16 @@ def scheduling_booking_to_dict(*, tenant: Tenant, booking: Booking) -> dict:
         "rescheduled_from_id": booking.rescheduled_from_id,
         "rescheduled_to_id": booking.rescheduled_to_id,
         "created_at": booking.created_at,
+        "customer_id": booking.customer_id,
     }
+    if viewer_role is None:
+        payload["contact_phone"] = booking.contact_phone
+        return payload
+
+    customer_phone, contact_phone = scheduling_booking_phone_for_viewer(
+        booking=booking,
+        role=viewer_role,
+    )
+    payload["customer_phone"] = customer_phone
+    payload["contact_phone"] = contact_phone
+    return payload

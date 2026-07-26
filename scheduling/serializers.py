@@ -172,6 +172,43 @@ class BookingListResponseSerializer(serializers.Serializer):
     bookings = BookingResponseSerializer(many=True)
 
 
+class StaffBookingCreateRequestSerializer(serializers.Serializer):
+    time_slot_id = serializers.IntegerField()
+    service_id = serializers.IntegerField()
+    party_size = serializers.IntegerField(min_value=1, default=1)
+    customer_id = serializers.IntegerField(required=False, allow_null=True)
+    contact_name = serializers.CharField(required=False, allow_blank=True, default="")
+    contact_phone = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class StaffBookingResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    status = serializers.CharField()
+    party_size = serializers.IntegerField()
+    contact_name = serializers.CharField()
+    contact_phone = serializers.CharField()
+    customer_phone = serializers.CharField(required=False)
+    customer_id = serializers.IntegerField()
+    service_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
+    time_slot_id = serializers.IntegerField()
+    start = serializers.CharField()
+    end = serializers.CharField()
+    rescheduled_from_id = serializers.IntegerField(allow_null=True, required=False)
+    rescheduled_to_id = serializers.IntegerField(allow_null=True, required=False)
+    created_at = serializers.DateTimeField()
+
+
+class StaffBookingListResponseSerializer(serializers.Serializer):
+    bookings = StaffBookingResponseSerializer(many=True)
+
+
+class TimeSlotCapacityAdjustRequestSerializer(serializers.Serializer):
+    capacity = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(min_length=1)
+
+
 class TenantBookingSettingsUpdateRequestSerializer(serializers.Serializer):
     min_advance_minutes = serializers.IntegerField(required=False, min_value=0)
     max_booking_window_days = serializers.IntegerField(required=False, min_value=1)
