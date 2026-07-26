@@ -17,4 +17,5 @@ urlpatterns = [
         name="tenant-customer-me",
     ),
     path("catalog/", include("catalog.urls")),
+    path("scheduling/", include("scheduling.urls")),
 ]

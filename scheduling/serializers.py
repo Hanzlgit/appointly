@@ -1,0 +1,84 @@
+from rest_framework import serializers
+
+
+class ScheduleRuleCreateRequestSerializer(serializers.Serializer):
+    location_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    days_of_week = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6),
+        allow_empty=False,
+    )
+    start_time = serializers.TimeField()
+    end_time = serializers.TimeField()
+    capacity = serializers.IntegerField(min_value=1)
+
+
+class ScheduleRuleUpdateRequestSerializer(serializers.Serializer):
+    effective_date = serializers.DateField()
+    location_id = serializers.IntegerField(required=False)
+    resource_id = serializers.IntegerField(required=False)
+    days_of_week = serializers.ListField(
+        child=serializers.IntegerField(min_value=0, max_value=6),
+        required=False,
+    )
+    start_time = serializers.TimeField(required=False)
+    end_time = serializers.TimeField(required=False)
+    capacity = serializers.IntegerField(min_value=1, required=False)
+    is_active = serializers.BooleanField(required=False)
+
+
+class ScheduleRuleResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    days_of_week = serializers.ListField(child=serializers.IntegerField())
+    start_time = serializers.CharField()
+    end_time = serializers.CharField()
+    capacity = serializers.IntegerField()
+    is_active = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+
+class ScheduleRuleListResponseSerializer(serializers.Serializer):
+    rules = ScheduleRuleResponseSerializer(many=True)
+
+
+class TimeSlotCreateRequestSerializer(serializers.Serializer):
+    location_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    capacity = serializers.IntegerField(min_value=1)
+
+
+class TimeSlotCloseRequestSerializer(serializers.Serializer):
+    pass
+
+
+class TimeSlotBatchCloseRequestSerializer(serializers.Serializer):
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    location_id = serializers.IntegerField(required=False, allow_null=True)
+    resource_id = serializers.IntegerField(required=False, allow_null=True)
+
+
+class TimeSlotResponseSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
+    resource_id = serializers.IntegerField()
+    schedule_rule_id = serializers.IntegerField(allow_null=True)
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    capacity = serializers.IntegerField()
+    status = serializers.CharField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+
+class TimeSlotBatchCloseResponseSerializer(serializers.Serializer):
+    closed_count = serializers.IntegerField()
+
+
+class TimeSlotBatchCloseConflictResponseSerializer(serializers.Serializer):
+    conflicts = serializers.ListField(child=serializers.IntegerField())

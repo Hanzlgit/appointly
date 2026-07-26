@@ -92,6 +92,7 @@ INSTALLED_APPS = [
     "accounts.apps.AccountsConfig",
     "tenants.apps.TenantsConfig",
     "catalog.apps.CatalogConfig",
+    "scheduling.apps.SchedulingConfig",
 ]
 
 MIDDLEWARE = [
@@ -214,6 +215,12 @@ CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://127.0.0
 CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 CELERY_TASK_EAGER_PROPAGATES = True
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BEAT_SCHEDULE = {
+    "scheduling-generate-timeslots": {
+        "task": "scheduling.generate_timeslots_for_all_tenants",
+        "schedule": 3600.0,
+    },
+}
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
 if SENTRY_DSN:
