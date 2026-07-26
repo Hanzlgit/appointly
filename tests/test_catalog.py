@@ -1,4 +1,4 @@
-from catalog.models import CatalogBusinessReference, Location, Service
+from catalog.models import CatalogBusinessReference, Location, Resource, Service
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 from tenants.models import Tenant, TenantMembership, TenantRole
@@ -239,6 +239,25 @@ class CatalogPublicBrowseTests(APITestCase):
         self.assertEqual(catalog["locations"][0]["name"], "Open Branch")
         self.assertEqual(len(catalog["services"]), 1)
         self.assertEqual(catalog["services"][0]["name"], "Active Service")
+        self.assertEqual(catalog["services"][0]["location_ids"], [])
+
+    def test_public_service_includes_location_ids_from_linked_resources(self):
+        """验证公开服务返回其资源所属地点列表。"""
+        resource = Resource.objects.create(
+            tenant=self.tenant,
+            name="Alice",
+            resource_type="staff",
+            is_active=True,
+        )
+        resource.locations.add(self.active_location)
+        service = Service.objects.get(tenant=self.tenant, name="Active Service")
+        service.resources.add(resource)
+
+        response = self.client.get("/api/v1/acme/catalog/public/")
+
+        self.assertEqual(response.status_code, 200)
+        services = api_data(response)["services"]
+        self.assertEqual(services[0]["location_ids"], [self.active_location.id])
 
 
 class CatalogTenantIsolationTests(APITestCase):

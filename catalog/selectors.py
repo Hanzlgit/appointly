@@ -107,7 +107,9 @@ def catalog_service_list_active_for_tenant(*, tenant: Tenant) -> list[Service]:
         list[Service]: 启用的服务项目列表。
     """
     return list(
-        Service.objects.filter(tenant=tenant, is_active=True).order_by("name"),
+        Service.objects.filter(tenant=tenant, is_active=True)
+        .prefetch_related("resources__locations")
+        .order_by("name"),
     )
 
 
@@ -201,6 +203,27 @@ def catalog_public_location_to_dict(*, location: Location) -> dict[str, object]:
     }
 
 
+def catalog_public_service_location_ids(*, service: Service) -> list[int]:
+    """计算服务项目在哪些启用地点可预约。
+
+    通过服务关联的启用资源及其所属启用地点推导。
+
+    Args:
+        service (Service): 服务项目实例。
+
+    Returns:
+        list[int]: 可预约地点 ID 列表（升序）。
+    """
+    location_ids: set[int] = set()
+    for resource in service.resources.all():
+        if not resource.is_active:
+            continue
+        for location in resource.locations.all():
+            if location.is_active:
+                location_ids.add(location.id)
+    return sorted(location_ids)
+
+
 def catalog_public_service_to_dict(*, service: Service) -> dict[str, object]:
     """将启用服务映射为公开目录响应字典。
 
@@ -217,4 +240,5 @@ def catalog_public_service_to_dict(*, service: Service) -> dict[str, object]:
         "duration_minutes": service.duration_minutes,
         "price_cents": service.price_cents,
         "currency": service.currency,
+        "location_ids": catalog_public_service_location_ids(service=service),
     }

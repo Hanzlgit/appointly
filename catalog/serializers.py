@@ -124,6 +124,7 @@ class CatalogPublicServiceResponseSerializer(serializers.Serializer):
     duration_minutes = serializers.IntegerField()
     price_cents = serializers.IntegerField()
     currency = serializers.CharField()
+    location_ids = serializers.ListField(child=serializers.IntegerField())
 
 
 class CatalogPublicBrowseResponseSerializer(serializers.Serializer):
