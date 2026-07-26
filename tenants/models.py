@@ -16,12 +16,16 @@ class Tenant(models.Model):
         verbose_name_plural = "租户"
 
     def __str__(self) -> str:
+        """返回租户名称。"""
         return self.name
 
 
 class TenantRole(models.TextChoices):
     TENANT_ADMIN = "tenant_admin", "租户管理员"
     STAFF = "staff", "工作人员"
+
+
+PLATFORM_ADMIN_ROLE = "platform_admin"
 
 
 class TenantMembership(models.Model):
@@ -45,6 +49,7 @@ class TenantMembership(models.Model):
         verbose_name_plural = "租户成员"
 
     def __str__(self) -> str:
+        """返回 ``用户 @ 租户 (角色)`` 格式的标识。"""
         return f"{self.user} @ {self.tenant} ({self.role})"
 
 
@@ -63,6 +68,7 @@ class TenantScopedRecord(models.Model):
         ordering = ["label"]
 
     def __str__(self) -> str:
+        """返回 ``租户slug:标签`` 格式的标识。"""
         return f"{self.tenant.slug}:{self.label}"
 
 
@@ -90,4 +96,5 @@ class TenantCustomer(models.Model):
         verbose_name_plural = "租户客户档案"
 
     def __str__(self) -> str:
+        """返回 ``用户 @ 租户`` 格式的标识。"""
         return f"{self.user} @ {self.tenant}"

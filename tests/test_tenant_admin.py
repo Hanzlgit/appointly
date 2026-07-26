@@ -5,6 +5,7 @@ from tenants.models import Tenant, TenantMembership, TenantRole
 
 class TenantAdminTests(TestCase):
     def setUp(self):
+        """准备测试数据。"""
         self.admin_user = User.objects.create_superuser(
             username="platform-admin",
             email="admin@example.com",
@@ -13,6 +14,7 @@ class TenantAdminTests(TestCase):
         self.client.force_login(self.admin_user)
 
     def test_platform_admin_can_create_tenant_with_default_timezone(self):
+        """验证平台超管可创建带默认时区的租户。"""
         response = self.client.post(
             "/admin/tenants/tenant/add/",
             {
@@ -30,6 +32,7 @@ class TenantAdminTests(TestCase):
         self.assertTrue(tenant.is_active)
 
     def test_platform_admin_can_create_first_tenant_admin_membership(self):
+        """验证平台超管可创建首个租户管理员成员关系。"""
         tenant = Tenant.objects.create(slug="acme", name="Acme Corp")
 
         response = self.client.post(
@@ -53,6 +56,7 @@ class TenantAdminTests(TestCase):
         self.assertEqual(membership.role, TenantRole.TENANT_ADMIN)
 
     def test_platform_admin_can_deactivate_tenant(self):
+        """验证平台超管可停用租户。"""
         tenant = Tenant.objects.create(slug="acme", name="Acme Corp")
 
         response = self.client.post(

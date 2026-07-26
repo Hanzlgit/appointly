@@ -5,10 +5,26 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 
 def health_live(_request):
+    """Kubernetes liveness 探针：进程存活即返回 ok。
+
+    Args:
+        _request: Django 请求对象（未使用）。
+
+    Returns:
+        JsonResponse: ``{"status": "ok"}``。
+    """
     return JsonResponse({"status": "ok"})
 
 
 def health_ready(_request):
+    """Kubernetes readiness 探针：数据库可连接时返回 ready。
+
+    Args:
+        _request: Django 请求对象（未使用）。
+
+    Returns:
+        JsonResponse: 就绪时 ``{"status": "ready"}``；不可用时 HTTP 503。
+    """
     from django.db import connection
 
     try:

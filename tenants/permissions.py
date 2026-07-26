@@ -7,6 +7,15 @@ class RequiresTenantMembership(BasePermission):
     message = "无权访问该租户。"
 
     def has_permission(self, request, view) -> bool:
+        """判断用户是否为租户成员或平台超管。
+
+        Args:
+            request: DRF 请求对象。
+            view: 当前视图，须实现 ``get_tenant()``。
+
+        Returns:
+            bool: 有权限时返回 ``True``。
+        """
         user = request.user
         if not user or not user.is_authenticated:
             return False
@@ -21,6 +30,15 @@ class RequiresTenantAdmin(BasePermission):
     message = "需要租户管理员权限。"
 
     def has_permission(self, request, view) -> bool:
+        """判断用户是否为租户管理员或平台超管。
+
+        Args:
+            request: DRF 请求对象。
+            view: 当前视图，须实现 ``get_tenant()``。
+
+        Returns:
+            bool: 有权限时返回 ``True``。
+        """
         user = request.user
         if not user or not user.is_authenticated:
             return False
@@ -38,6 +56,15 @@ class RequiresTenantCustomer(BasePermission):
     message = "需要该租户下的客户档案。"
 
     def has_permission(self, request, view) -> bool:
+        """判断用户是否在该租户下拥有客户档案。
+
+        Args:
+            request: DRF 请求对象。
+            view: 当前视图，须实现 ``get_tenant()``。
+
+        Returns:
+            bool: 有权限时返回 ``True``。
+        """
         user = request.user
         if not user or not user.is_authenticated:
             return False

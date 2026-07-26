@@ -6,6 +6,7 @@ class AppointlyConfig(AppConfig):
     name = "appointly"
 
     def ready(self) -> None:
+        """应用启动钩子。"""
         from config.celery import app as celery_app
 
         _ = celery_app

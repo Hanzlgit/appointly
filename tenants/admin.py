@@ -38,6 +38,16 @@ class TenantMembershipCreateInline(admin.TabularInline):
     verbose_name_plural = "首个租户管理员"
 
     def get_formset(self, request, obj=None, **kwargs):
+        """创建 inline formset 并预设首个管理员角色。
+
+        Args:
+            request: Django admin 请求对象。
+            obj: 当前编辑的 ``User`` 实例，新建时为 ``None``。
+            **kwargs: 传给父类 ``get_formset`` 的额外参数。
+
+        Returns:
+            BaseInlineFormSet: 角色默认值为 ``TENANT_ADMIN`` 的 formset。
+        """
         formset = super().get_formset(request, obj, **kwargs)
         formset.form.base_fields["role"].initial = TenantRole.TENANT_ADMIN
         return formset

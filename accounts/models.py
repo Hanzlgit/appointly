@@ -15,6 +15,7 @@ class StaffProfile(models.Model):
         verbose_name_plural = "后台账号资料"
 
     def __str__(self) -> str:
+        """返回后台账号的展示标识。"""
         return self.phone or str(self.user)
 
 
@@ -31,4 +32,5 @@ class CustomerProfile(models.Model):
         verbose_name_plural = "客户账号资料"
 
     def __str__(self) -> str:
+        """返回客户手机号。"""
         return self.phone

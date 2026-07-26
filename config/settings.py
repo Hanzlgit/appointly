@@ -9,6 +9,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def _load_dotenv(path: Path) -> None:
+    """从 ``.env`` 文件加载环境变量（不覆盖已有值）。
+
+    Args:
+        path (Path): ``.env`` 文件路径。
+    """
     if not path.exists():
         return
 
@@ -24,6 +29,15 @@ _load_dotenv(BASE_DIR / ".env")
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
+    """读取布尔型环境变量。
+
+    Args:
+        name (str): 环境变量名。
+        default (bool): 未设置时的默认值。
+
+    Returns:
+        bool: 解析后的布尔值。
+    """
     value = os.environ.get(name)
     if value is None:
         return default
@@ -31,6 +45,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 def _database_from_url(url: str) -> dict:
+    """将数据库 URL 解析为 Django ``DATABASES`` 配置项。
+
+    Args:
+        url (str): 形如 ``mysql://user:pass@host:port/db`` 的连接 URL。
+
+    Returns:
+        dict: Django 数据库配置字典。
+    """
     parsed = urlparse(url)
     return {
         "ENGINE": "django.db.backends.mysql",
@@ -74,6 +96,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
+    "appointly.api.middleware.RequestIdMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -126,6 +149,15 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 def _env_int(name: str, default: int) -> int:
+    """读取整型环境变量。
+
+    Args:
+        name (str): 环境变量名。
+        default (int): 未设置时的默认值。
+
+    Returns:
+        int: 解析后的整数值。
+    """
     value = os.environ.get(name)
     if value is None:
         return default
@@ -140,6 +172,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
+    "EXCEPTION_HANDLER": "appointly.api.exceptions.api_exception_handler",
 }
 
 SIMPLE_JWT = {

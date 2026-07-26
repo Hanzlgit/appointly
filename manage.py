@@ -4,6 +4,7 @@ import sys
 
 
 def main() -> None:
+    """Django 管理命令入口。"""
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     from django.core.management import execute_from_command_line
 
