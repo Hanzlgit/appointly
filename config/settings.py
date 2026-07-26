@@ -235,6 +235,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "notifications.send_appointment_reminders",
         "schedule": 300.0,
     },
+    "audit-purge-expired-logs": {
+        "task": "audit.purge_expired_logs",
+        "schedule": 86400.0,
+    },
 }
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")
