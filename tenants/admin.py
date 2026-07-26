@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.models import User
 
-from tenants.models import Tenant, TenantMembership, TenantRole
+from tenants.models import Tenant, TenantCustomer, TenantMembership, TenantRole
 
 
 @admin.register(Tenant)
@@ -18,6 +18,14 @@ class TenantMembershipAdmin(admin.ModelAdmin):
     list_display = ("user", "tenant", "role", "created_at")
     list_filter = ("role", "tenant")
     search_fields = ("user__username", "tenant__name", "tenant__slug")
+    autocomplete_fields = ("user", "tenant")
+
+
+@admin.register(TenantCustomer)
+class TenantCustomerAdmin(admin.ModelAdmin):
+    list_display = ("user", "tenant", "display_name", "created_at")
+    list_filter = ("tenant",)
+    search_fields = ("user__username", "user__customer_profile__phone", "display_name")
     autocomplete_fields = ("user", "tenant")
 
 

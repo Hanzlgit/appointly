@@ -16,3 +16,19 @@ class StaffProfile(models.Model):
 
     def __str__(self) -> str:
         return self.phone or str(self.user)
+
+
+class CustomerProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="customer_profile",
+    )
+    phone = models.CharField(max_length=32, unique=True)
+
+    class Meta:
+        verbose_name = "客户账号资料"
+        verbose_name_plural = "客户账号资料"
+
+    def __str__(self) -> str:
+        return self.phone

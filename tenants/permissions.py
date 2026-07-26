@@ -32,3 +32,15 @@ class RequiresTenantAdmin(BasePermission):
             tenant=tenant,
             role=TenantRole.TENANT_ADMIN,
         ).exists()
+
+
+class RequiresTenantCustomer(BasePermission):
+    message = "需要该租户下的客户档案。"
+
+    def has_permission(self, request, view) -> bool:
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+
+        tenant = view.get_tenant()
+        return user.tenant_customers.filter(tenant=tenant).exists()

@@ -64,3 +64,30 @@ class TenantScopedRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tenant.slug}:{self.label}"
+
+
+class TenantCustomer(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name="customers")
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="tenant_customers",
+    )
+    display_name = models.CharField(max_length=255, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    tags = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "user"],
+                name="unique_tenant_customer",
+            ),
+        ]
+        verbose_name = "租户客户档案"
+        verbose_name_plural = "租户客户档案"
+
+    def __str__(self) -> str:
+        return f"{self.user} @ {self.tenant}"

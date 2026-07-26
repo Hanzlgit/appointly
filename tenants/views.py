@@ -3,8 +3,12 @@ from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from tenants.models import Tenant, TenantScopedRecord
-from tenants.permissions import RequiresTenantAdmin, RequiresTenantMembership
+from tenants.models import Tenant, TenantCustomer, TenantScopedRecord
+from tenants.permissions import (
+    RequiresTenantAdmin,
+    RequiresTenantCustomer,
+    RequiresTenantMembership,
+)
 
 
 class TenantContextMixin:
@@ -76,3 +80,21 @@ class TenantScopedRecordView(TenantContextMixin, APIView):
 
         TenantScopedRecord.objects.create(tenant=tenant, label=label)
         return Response({"label": label}, status=status.HTTP_201_CREATED)
+
+
+class TenantCustomerMeView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantCustomer]
+
+    def get(self, request, *args, **kwargs):
+        tenant = self.get_tenant()
+        tenant_customer = TenantCustomer.objects.get(tenant=tenant, user=request.user)
+        return Response(
+            {
+                "tenant_slug": tenant.slug,
+                "phone": request.user.customer_profile.phone,
+                "display_name": tenant_customer.display_name,
+                "notes": tenant_customer.notes,
+                "tags": tenant_customer.tags,
+            },
+            status=status.HTTP_200_OK,
+        )
