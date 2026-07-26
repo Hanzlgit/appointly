@@ -34,6 +34,8 @@ def scheduling_booking_create(
     start=None,
     end=None,
     resource_id: int | None = None,
+    contact_name: str = "",
+    contact_phone: str = "",
 ) -> Booking:
     """创建客户预约，按租户确认模式设为 CONFIRMED 或 PENDING。
 
@@ -51,6 +53,8 @@ def scheduling_booking_create(
         start: 未指定时段时的开始时间（UTC）。
         end: 未指定时段时的结束时间（UTC）。
         resource_id (int | None): 可选指定资源；省略时自动分配。
+        contact_name (str): 代他人预约时的联系人姓名。
+        contact_phone (str): 代他人预约时的联系人手机号。
 
     Returns:
         Booking: 新建或幂等重放的预约。
@@ -132,6 +136,8 @@ def scheduling_booking_create(
             service=service,
             status=status,
             party_size=party_size,
+            contact_name=contact_name.strip(),
+            contact_phone=contact_phone.strip(),
             idempotency_key=idempotency_key,
             pending_expires_at=pending_expires_at,
         )

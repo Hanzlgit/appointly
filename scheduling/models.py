@@ -9,9 +9,17 @@ class TimeSlotStatus(models.TextChoices):
 class BookingStatus(models.TextChoices):
     PENDING = "pending", "待确认"
     CONFIRMED = "confirmed", "已确认"
+    STARTED = "started", "已开始"
     CANCELLED = "cancelled", "已取消"
+    RESCHEDULED = "rescheduled", "已改期"
     EXPIRED = "expired", "已过期"
     REJECTED = "rejected", "已拒绝"
+
+
+class BookingCancelActor(models.TextChoices):
+    CUSTOMER = "customer", "客户"
+    ADMIN = "admin", "管理员"
+    SYSTEM = "system", "系统"
 
 
 class BookingConfirmationMode(models.TextChoices):
@@ -158,8 +166,39 @@ class Booking(models.Model):
     )
     status = models.CharField(max_length=16, choices=BookingStatus.choices)
     party_size = models.PositiveIntegerField(default=1)
+    contact_name = models.CharField(max_length=128, blank=True, default="")
+    contact_phone = models.CharField(max_length=32, blank=True, default="")
     idempotency_key = models.CharField(max_length=128)
     pending_expires_at = models.DateTimeField(null=True, blank=True)
+    cancel_actor = models.CharField(
+        max_length=16,
+        choices=BookingCancelActor.choices,
+        null=True,
+        blank=True,
+    )
+    cancel_reason = models.TextField(blank=True, default="")
+    cancel_operator = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cancelled_bookings",
+    )
+    rescheduled_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rescheduled_from_booking",
+    )
+    rescheduled_from = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rescheduled_to_booking",
+    )
+    archived_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

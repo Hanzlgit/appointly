@@ -128,19 +128,44 @@ class BookingCreateRequestSerializer(serializers.Serializer):
     start = serializers.DateTimeField(required=False)
     end = serializers.DateTimeField(required=False)
     resource_id = serializers.IntegerField(required=False)
+    contact_name = serializers.CharField(required=False, allow_blank=True, default="")
+    contact_phone = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class BookingResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     status = serializers.CharField()
     party_size = serializers.IntegerField()
+    contact_name = serializers.CharField()
+    contact_phone = serializers.CharField()
     service_id = serializers.IntegerField()
     resource_id = serializers.IntegerField()
     location_id = serializers.IntegerField()
     time_slot_id = serializers.IntegerField()
     start = serializers.CharField()
     end = serializers.CharField()
+    rescheduled_from_id = serializers.IntegerField(allow_null=True, required=False)
+    rescheduled_to_id = serializers.IntegerField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
+
+
+class BookingCancelRequestSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class BookingRescheduleRequestSerializer(serializers.Serializer):
+    time_slot_id = serializers.IntegerField()
+    idempotency_key = serializers.CharField(max_length=128)
+
+
+class BookingPartySizeUpdateRequestSerializer(serializers.Serializer):
+    party_size = serializers.IntegerField(min_value=1)
+
+
+class BookingContactUpdateRequestSerializer(serializers.Serializer):
+    contact_name = serializers.CharField(required=False, allow_blank=True, default="")
+    contact_phone = serializers.CharField(required=False, allow_blank=True, default="")
+    otp_code = serializers.CharField(required=False, allow_blank=True)
 
 
 class BookingListResponseSerializer(serializers.Serializer):

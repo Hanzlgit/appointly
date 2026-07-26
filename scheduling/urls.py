@@ -24,6 +24,26 @@ urlpatterns = [
         name="scheduling-booking-reject",
     ),
     path(
+        "bookings/<int:booking_id>/cancel/",
+        views.BookingCancelView.as_view(),
+        name="scheduling-booking-cancel",
+    ),
+    path(
+        "bookings/<int:booking_id>/reschedule/",
+        views.BookingRescheduleView.as_view(),
+        name="scheduling-booking-reschedule",
+    ),
+    path(
+        "bookings/<int:booking_id>/party-size/",
+        views.BookingPartySizeUpdateView.as_view(),
+        name="scheduling-booking-party-size",
+    ),
+    path(
+        "bookings/<int:booking_id>/contact/",
+        views.BookingContactUpdateView.as_view(),
+        name="scheduling-booking-contact",
+    ),
+    path(
         "booking-settings/",
         views.TenantBookingSettingsView.as_view(),
         name="scheduling-booking-settings",

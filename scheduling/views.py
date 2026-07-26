@@ -16,7 +16,7 @@ from tenants.permissions import (
 from tenants.selectors import tenant_customer_get_for_user
 from tenants.views import TenantContextMixin
 
-from scheduling.models import Booking, ScheduleRule, TimeSlot
+from scheduling.models import Booking, BookingCancelActor, ScheduleRule, TimeSlot
 from scheduling.selectors import (
     scheduling_booking_list_for_customer,
     scheduling_booking_settings_to_dict,
@@ -31,8 +31,12 @@ from scheduling.serializers import (
     AvailabilityAggregateQueryResponseSerializer,
     AvailabilityQueryRequestSerializer,
     AvailabilityResourceQueryResponseSerializer,
+    BookingCancelRequestSerializer,
+    BookingContactUpdateRequestSerializer,
     BookingCreateRequestSerializer,
     BookingListResponseSerializer,
+    BookingPartySizeUpdateRequestSerializer,
+    BookingRescheduleRequestSerializer,
     BookingResponseSerializer,
     ScheduleRuleCreateRequestSerializer,
     ScheduleRuleListResponseSerializer,
@@ -53,9 +57,13 @@ from scheduling.services.booking_settings import (
     scheduling_booking_settings_update,
 )
 from scheduling.services.booking_transition import (
+    scheduling_booking_cancel,
     scheduling_booking_confirm,
+    scheduling_booking_contact_update,
     scheduling_booking_get_for_tenant,
+    scheduling_booking_party_size_update,
     scheduling_booking_reject,
+    scheduling_booking_reschedule,
 )
 from scheduling.services.schedule_rule import (
     scheduling_schedule_rule_create,
@@ -105,6 +113,34 @@ def _validation_error_response(request, exc: DjangoValidationError) -> Response:
         )
     _raise_drf_validation_error(exc)
     return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+def _scheduling_customer_booking_get(
+    *,
+    tenant,
+    customer,
+    booking_id: int,
+) -> Booking:
+    """获取客户拥有的预约，非本人返回 404。
+
+    Args:
+        tenant: 目标租户。
+        customer: 客户档案。
+        booking_id (int): 预约 ID。
+
+    Returns:
+        Booking: 匹配的预约。
+
+    Raises:
+        NotFound: 预约不存在或非本人。
+    """
+    try:
+        booking = scheduling_booking_get_for_tenant(tenant=tenant, booking_id=booking_id)
+    except Booking.DoesNotExist as exc:
+        raise NotFound("预约不存在。") from exc
+    if booking.customer_id != customer.id:
+        raise NotFound("预约不存在。")
+    return booking
 
 
 class ScheduleRuleListCreateView(TenantContextMixin, APIView):
@@ -484,6 +520,8 @@ class BookingListCreateView(TenantContextMixin, APIView):
                 start=validated_data.get("start"),
                 end=validated_data.get("end"),
                 resource_id=validated_data.get("resource_id"),
+                contact_name=validated_data.get("contact_name", ""),
+                contact_phone=validated_data.get("contact_phone", ""),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
@@ -622,6 +660,184 @@ class BookingRejectView(TenantContextMixin, APIView):
 
         try:
             booking = scheduling_booking_reject(booking=booking)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingCancelView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantCustomer]
+
+    @extend_schema(
+        summary="客户取消预约",
+        request=BookingCancelRequestSerializer,
+        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """客户在最晚取消时间前取消预约。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
+        booking_id = self.kwargs["booking_id"]
+        booking = _scheduling_customer_booking_get(
+            tenant=tenant,
+            customer=customer,
+            booking_id=booking_id,
+        )
+
+        request_serializer = BookingCancelRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            booking = scheduling_booking_cancel(
+                booking=booking,
+                actor=BookingCancelActor.CUSTOMER,
+                reason=validated_data.get("reason", ""),
+                operator=request.user,
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingRescheduleView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantCustomer]
+
+    @extend_schema(
+        summary="客户改期",
+        request=BookingRescheduleRequestSerializer,
+        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """客户将预约改至新时段。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含新预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
+        booking = _scheduling_customer_booking_get(
+            tenant=tenant,
+            customer=customer,
+            booking_id=self.kwargs["booking_id"],
+        )
+
+        request_serializer = BookingRescheduleRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            new_booking = scheduling_booking_reschedule(
+                booking=booking,
+                new_time_slot_id=validated_data["time_slot_id"],
+                idempotency_key=validated_data["idempotency_key"],
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=new_booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingPartySizeUpdateView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantCustomer]
+
+    @extend_schema(
+        summary="客户修改预约人数",
+        request=BookingPartySizeUpdateRequestSerializer,
+        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def patch(self, request, *args, **kwargs):
+        """客户修改预约人数。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
+        booking = _scheduling_customer_booking_get(
+            tenant=tenant,
+            customer=customer,
+            booking_id=self.kwargs["booking_id"],
+        )
+
+        request_serializer = BookingPartySizeUpdateRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            booking = scheduling_booking_party_size_update(
+                booking=booking,
+                party_size=validated_data["party_size"],
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingContactUpdateView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantCustomer]
+
+    @extend_schema(
+        summary="客户更新预约联系人",
+        request=BookingContactUpdateRequestSerializer,
+        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def patch(self, request, *args, **kwargs):
+        """更新代他人预约的联系人；手机号变更需 OTP。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
+        booking = _scheduling_customer_booking_get(
+            tenant=tenant,
+            customer=customer,
+            booking_id=self.kwargs["booking_id"],
+        )
+
+        request_serializer = BookingContactUpdateRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            booking = scheduling_booking_contact_update(
+                booking=booking,
+                contact_name=validated_data.get("contact_name", ""),
+                contact_phone=validated_data.get("contact_phone", ""),
+                otp_code=validated_data.get("otp_code") or None,
+            )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
 

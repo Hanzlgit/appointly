@@ -1,6 +1,22 @@
 from scheduling.models import Booking, BookingStatus, TimeSlot
 
-ACTIVE_BOOKING_STATUSES = {BookingStatus.PENDING, BookingStatus.CONFIRMED}
+ACTIVE_BOOKING_STATUSES = {
+    BookingStatus.PENDING,
+    BookingStatus.CONFIRMED,
+    BookingStatus.STARTED,
+}
+
+CUSTOMER_MODIFIABLE_BOOKING_STATUSES = {
+    BookingStatus.PENDING,
+    BookingStatus.CONFIRMED,
+}
+
+TERMINAL_BOOKING_STATUSES = {
+    BookingStatus.CANCELLED,
+    BookingStatus.RESCHEDULED,
+    BookingStatus.EXPIRED,
+    BookingStatus.REJECTED,
+}
 
 
 def scheduling_booking_has_active_on_slot(*, time_slot: TimeSlot) -> bool:
