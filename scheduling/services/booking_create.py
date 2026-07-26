@@ -141,6 +141,11 @@ def scheduling_booking_create(
             idempotency_key=idempotency_key,
             pending_expires_at=pending_expires_at,
         )
+        from notifications.services.booking_hooks import (
+            notifications_booking_outbox_write_for_create,
+        )
+
+        notifications_booking_outbox_write_for_create(booking=booking)
         return booking
 
 

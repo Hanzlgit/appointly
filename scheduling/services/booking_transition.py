@@ -49,9 +49,13 @@ def scheduling_booking_confirm(*, booking: Booking) -> Booking:
     if booking.status != BookingStatus.PENDING:
         raise ValidationError("仅待确认预约可被确认。")
 
-    booking.status = BookingStatus.CONFIRMED
-    booking.pending_expires_at = None
-    booking.save(update_fields=["status", "pending_expires_at", "updated_at"])
+    with transaction.atomic():
+        booking.status = BookingStatus.CONFIRMED
+        booking.pending_expires_at = None
+        booking.save(update_fields=["status", "pending_expires_at", "updated_at"])
+        from notifications.services.booking_hooks import notifications_booking_outbox_write
+
+        notifications_booking_outbox_write(booking=booking, event_type="booking.confirmed")
     return booking
 
 
@@ -187,21 +191,25 @@ def scheduling_booking_cancel(
     elif booking.status not in CUSTOMER_MODIFIABLE_BOOKING_STATUSES:
         raise ValidationError("当前预约状态不可取消。")
 
-    booking.status = BookingStatus.CANCELLED
-    booking.cancel_actor = actor
-    booking.cancel_reason = reason
-    booking.cancel_operator = operator
-    booking.pending_expires_at = None
-    booking.save(
-        update_fields=[
-            "status",
-            "cancel_actor",
-            "cancel_reason",
-            "cancel_operator",
-            "pending_expires_at",
-            "updated_at",
-        ]
-    )
+    with transaction.atomic():
+        booking.status = BookingStatus.CANCELLED
+        booking.cancel_actor = actor
+        booking.cancel_reason = reason
+        booking.cancel_operator = operator
+        booking.pending_expires_at = None
+        booking.save(
+            update_fields=[
+                "status",
+                "cancel_actor",
+                "cancel_reason",
+                "cancel_operator",
+                "pending_expires_at",
+                "updated_at",
+            ]
+        )
+        from notifications.services.booking_hooks import notifications_booking_outbox_write
+
+        notifications_booking_outbox_write(booking=booking, event_type="booking.cancelled")
     return booking
 
 
@@ -314,6 +322,9 @@ def scheduling_booking_reschedule(
                 "updated_at",
             ]
         )
+        from notifications.services.booking_hooks import notifications_booking_outbox_write
+
+        notifications_booking_outbox_write(booking=new_booking, event_type="booking.rescheduled")
         return new_booking
 
 

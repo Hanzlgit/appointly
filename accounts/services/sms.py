@@ -18,6 +18,15 @@ class SmsAdapter(Protocol):
         """
         ...
 
+    def send_booking_notification(self, *, phone: str, message: str) -> None:
+        """发送预约相关通知短信。
+
+        Args:
+            phone (str): 目标手机号。
+            message (str): 短信正文。
+        """
+        ...
+
 
 class MockSmsAdapter:
     """开发环境使用的 Mock 短信适配器。"""
@@ -30,9 +39,20 @@ class MockSmsAdapter:
             code (str): 验证码。
         """
         message = f"您的验证码是 {code}"
-        payload = {"phone": phone, "code": code, "message": message}
+        payload = {"kind": "otp", "phone": phone, "code": code, "message": message}
         _SENT_MESSAGES.append(payload)
         logger.info("mock_sms_send phone=%s code=%s", phone, code)
+
+    def send_booking_notification(self, *, phone: str, message: str) -> None:
+        """记录预约通知 Mock 短信供开发与测试使用。
+
+        Args:
+            phone (str): 目标手机号。
+            message (str): 短信正文。
+        """
+        payload = {"kind": "booking_notification", "phone": phone, "message": message}
+        _SENT_MESSAGES.append(payload)
+        logger.info("mock_sms_booking_notification phone=%s", phone)
 
 
 def sms_adapter_get() -> SmsAdapter:

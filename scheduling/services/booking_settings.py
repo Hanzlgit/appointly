@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from django.core.exceptions import ValidationError
+from notifications.constants import DEFAULT_REMINDER_MINUTES_BEFORE
 from tenants.models import Tenant
 
 from scheduling.constants import (
@@ -45,6 +46,7 @@ def scheduling_booking_settings_get_for_tenant(*, tenant: Tenant) -> TenantBooki
             "cancel_deadline_minutes": DEFAULT_CANCEL_DEADLINE_MINUTES,
             "future_booking_limit": DEFAULT_FUTURE_BOOKING_LIMIT,
             "confirmation_mode": DEFAULT_CONFIRMATION_MODE,
+            "reminder_minutes_before": DEFAULT_REMINDER_MINUTES_BEFORE,
         },
     )
     return settings

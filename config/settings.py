@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "tenants.apps.TenantsConfig",
     "catalog.apps.CatalogConfig",
     "scheduling.apps.SchedulingConfig",
+    "notifications.apps.NotificationsConfig",
 ]
 
 MIDDLEWARE = [
@@ -200,6 +201,7 @@ CACHES = {
 }
 
 SMS_ADAPTER = os.environ.get("SMS_ADAPTER", "mock")
+OUTBOX_MESSAGE_BROKER = os.environ.get("OUTBOX_MESSAGE_BROKER", "mock")
 OTP_CODE_LENGTH = _env_int("OTP_CODE_LENGTH", 6)
 OTP_TTL_SECONDS = _env_int("OTP_TTL_SECONDS", 300)
 OTP_SEND_INTERVAL_SECONDS = _env_int("OTP_SEND_INTERVAL_SECONDS", 60)
@@ -223,6 +225,14 @@ CELERY_BEAT_SCHEDULE = {
     "scheduling-expire-pending-bookings": {
         "task": "scheduling.expire_pending_bookings",
         "schedule": 60.0,
+    },
+    "notifications-publish-outbox": {
+        "task": "notifications.publish_outbox_events",
+        "schedule": 30.0,
+    },
+    "notifications-send-reminders": {
+        "task": "notifications.send_appointment_reminders",
+        "schedule": 300.0,
     },
 }
 

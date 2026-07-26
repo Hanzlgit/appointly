@@ -131,6 +131,7 @@ class TenantBookingSettings(models.Model):
         choices=BookingConfirmationMode.choices,
         default=BookingConfirmationMode.AUTO,
     )
+    reminder_minutes_before = models.PositiveIntegerField(default=60)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
