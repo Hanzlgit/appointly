@@ -10,6 +10,13 @@ class BookingStatus(models.TextChoices):
     PENDING = "pending", "待确认"
     CONFIRMED = "confirmed", "已确认"
     CANCELLED = "cancelled", "已取消"
+    EXPIRED = "expired", "已过期"
+    REJECTED = "rejected", "已拒绝"
+
+
+class BookingConfirmationMode(models.TextChoices):
+    AUTO = "auto", "自动确认"
+    MANUAL = "manual", "人工确认"
 
 
 class ScheduleRule(models.Model):
@@ -96,6 +103,36 @@ class TimeSlot(models.Model):
         return f"slot:{self.pk}@{self.resource_id}"
 
 
+class TenantBookingSettings(models.Model):
+    """租户预约业务规则配置。"""
+
+    tenant = models.OneToOneField(
+        "tenants.Tenant",
+        on_delete=models.CASCADE,
+        related_name="booking_settings",
+    )
+    min_advance_minutes = models.PositiveIntegerField(default=60)
+    max_booking_window_days = models.PositiveIntegerField(default=30)
+    pending_retention_minutes = models.PositiveIntegerField(default=30)
+    cancel_deadline_minutes = models.PositiveIntegerField(default=120)
+    future_booking_limit = models.PositiveIntegerField(default=5)
+    confirmation_mode = models.CharField(
+        max_length=16,
+        choices=BookingConfirmationMode.choices,
+        default=BookingConfirmationMode.AUTO,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "租户预约规则"
+        verbose_name_plural = "租户预约规则"
+
+    def __str__(self) -> str:
+        """返回租户 slug 标识。"""
+        return f"booking-settings:{self.tenant.slug}"
+
+
 class Booking(models.Model):
     """客户预约记录。"""
 
@@ -122,6 +159,7 @@ class Booking(models.Model):
     status = models.CharField(max_length=16, choices=BookingStatus.choices)
     party_size = models.PositiveIntegerField(default=1)
     idempotency_key = models.CharField(max_length=128)
+    pending_expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

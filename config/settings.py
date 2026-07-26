@@ -220,6 +220,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "scheduling.generate_timeslots_for_all_tenants",
         "schedule": 3600.0,
     },
+    "scheduling-expire-pending-bookings": {
+        "task": "scheduling.expire_pending_bookings",
+        "schedule": 60.0,
+    },
 }
 
 SENTRY_DSN = os.environ.get("SENTRY_DSN", "")

@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from catalog.models import Service
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 from tenants.models import Tenant, TenantCustomer
 
-from scheduling.models import Booking, BookingStatus, TimeSlot, TimeSlotStatus
+from scheduling.constants import BookingConfirmationMode
+from scheduling.models import (
+    Booking,
+    BookingStatus,
+    TimeSlot,
+    TimeSlotStatus,
+)
 from scheduling.services.booking import ACTIVE_BOOKING_STATUSES
+from scheduling.services.booking_settings import scheduling_booking_settings_get_for_tenant
 
 
 def scheduling_booking_create(
@@ -25,10 +35,10 @@ def scheduling_booking_create(
     end=None,
     resource_id: int | None = None,
 ) -> Booking:
-    """创建客户预约并在自动确认模式下设为 CONFIRMED。
+    """创建客户预约，按租户确认模式设为 CONFIRMED 或 PENDING。
 
-    在 MySQL 事务内锁定时段并校验容量；同一客户、同一时段不可重复有效预约；
-    相同幂等键重试返回首次创建结果。
+    在 MySQL 事务内锁定时段并校验容量与业务规则；同一客户、同一时段不可重复有效预约；
+    相同幂等键重试返回首次创建结果。人工确认模式下 PENDING 预约预占容量并记录过期时间。
 
     Args:
         tenant (Tenant): 目标租户。
@@ -100,14 +110,30 @@ def scheduling_booking_create(
             party_size=party_size,
         )
 
+        settings = scheduling_booking_settings_get_for_tenant(tenant=tenant)
+        _scheduling_booking_validate_booking_rules(
+            customer=customer,
+            time_slot=time_slot,
+            settings=settings,
+        )
+
+        status = BookingStatus.CONFIRMED
+        pending_expires_at = None
+        if settings.confirmation_mode == BookingConfirmationMode.MANUAL:
+            status = BookingStatus.PENDING
+            pending_expires_at = timezone.now() + timedelta(
+                minutes=settings.pending_retention_minutes
+            )
+
         booking = Booking.objects.create(
             tenant=tenant,
             customer=customer,
             time_slot=time_slot,
             service=service,
-            status=BookingStatus.CONFIRMED,
+            status=status,
             party_size=party_size,
             idempotency_key=idempotency_key,
+            pending_expires_at=pending_expires_at,
         )
         return booking
 
@@ -296,3 +322,35 @@ def _scheduling_booking_validate_capacity(
     """
     if _scheduling_booking_remaining_capacity(time_slot=time_slot) < party_size:
         raise ValidationError("该时段容量不足。")
+
+
+def _scheduling_booking_validate_booking_rules(
+    *,
+    customer: TenantCustomer,
+    time_slot: TimeSlot,
+    settings,
+) -> None:
+    """校验租户预约业务规则（窗口、未来预约上限）。
+
+    Args:
+        customer (TenantCustomer): 客户档案。
+        time_slot (TimeSlot): 固定时段。
+        settings: ``TenantBookingSettings`` 实例。
+
+    Raises:
+        ValidationError: 违反业务规则。
+    """
+    now = timezone.now()
+    slot_start = time_slot.start
+    if slot_start < now + timedelta(minutes=settings.min_advance_minutes):
+        raise ValidationError("预约时间早于允许的最短提前预约时间。")
+    if slot_start > now + timedelta(days=settings.max_booking_window_days):
+        raise ValidationError("预约时间超出允许的最远可预约范围。")
+
+    future_active_count = Booking.objects.filter(
+        customer=customer,
+        status__in=ACTIVE_BOOKING_STATUSES,
+        time_slot__start__gt=now,
+    ).count()
+    if future_active_count >= settings.future_booking_limit:
+        raise ValidationError("您已达到未来有效预约数量上限。")

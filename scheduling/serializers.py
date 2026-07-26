@@ -145,3 +145,25 @@ class BookingResponseSerializer(serializers.Serializer):
 
 class BookingListResponseSerializer(serializers.Serializer):
     bookings = BookingResponseSerializer(many=True)
+
+
+class TenantBookingSettingsUpdateRequestSerializer(serializers.Serializer):
+    min_advance_minutes = serializers.IntegerField(required=False, min_value=0)
+    max_booking_window_days = serializers.IntegerField(required=False, min_value=1)
+    pending_retention_minutes = serializers.IntegerField(required=False, min_value=1)
+    cancel_deadline_minutes = serializers.IntegerField(required=False, min_value=0)
+    future_booking_limit = serializers.IntegerField(required=False, min_value=1)
+    confirmation_mode = serializers.ChoiceField(
+        choices=["auto", "manual"],
+        required=False,
+    )
+
+
+class TenantBookingSettingsResponseSerializer(serializers.Serializer):
+    min_advance_minutes = serializers.IntegerField()
+    max_booking_window_days = serializers.IntegerField()
+    pending_retention_minutes = serializers.IntegerField()
+    cancel_deadline_minutes = serializers.IntegerField()
+    future_booking_limit = serializers.IntegerField()
+    confirmation_mode = serializers.CharField()
+    updated_at = serializers.DateTimeField()

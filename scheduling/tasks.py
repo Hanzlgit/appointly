@@ -1,7 +1,18 @@
 from tenants.models import Tenant
 
 from celery import shared_task
+from scheduling.services.booking_transition import scheduling_booking_expire_overdue_pending
 from scheduling.services.time_slot import scheduling_timeslots_generate_for_tenant
+
+
+@shared_task(name="scheduling.expire_pending_bookings")
+def scheduling_expire_pending_bookings() -> int:
+    """将超时待确认预约标记为已过期并释放容量。
+
+    Returns:
+        int: 成功过期的预约数量。
+    """
+    return scheduling_booking_expire_overdue_pending()
 
 
 @shared_task(name="scheduling.generate_timeslots_for_all_tenants")

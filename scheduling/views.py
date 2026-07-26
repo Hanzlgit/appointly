@@ -16,9 +16,10 @@ from tenants.permissions import (
 from tenants.selectors import tenant_customer_get_for_user
 from tenants.views import TenantContextMixin
 
-from scheduling.models import ScheduleRule, TimeSlot
+from scheduling.models import Booking, ScheduleRule, TimeSlot
 from scheduling.selectors import (
     scheduling_booking_list_for_customer,
+    scheduling_booking_settings_to_dict,
     scheduling_booking_to_dict,
     scheduling_schedule_rule_get_for_tenant,
     scheduling_schedule_rule_list_for_tenant,
@@ -37,6 +38,8 @@ from scheduling.serializers import (
     ScheduleRuleListResponseSerializer,
     ScheduleRuleResponseSerializer,
     ScheduleRuleUpdateRequestSerializer,
+    TenantBookingSettingsResponseSerializer,
+    TenantBookingSettingsUpdateRequestSerializer,
     TimeSlotBatchCloseConflictResponseSerializer,
     TimeSlotBatchCloseRequestSerializer,
     TimeSlotBatchCloseResponseSerializer,
@@ -45,6 +48,15 @@ from scheduling.serializers import (
 )
 from scheduling.services.availability_cache import scheduling_availability_query_cached
 from scheduling.services.booking_create import scheduling_booking_create
+from scheduling.services.booking_settings import (
+    scheduling_booking_settings_get_for_tenant,
+    scheduling_booking_settings_update,
+)
+from scheduling.services.booking_transition import (
+    scheduling_booking_confirm,
+    scheduling_booking_get_for_tenant,
+    scheduling_booking_reject,
+)
 from scheduling.services.schedule_rule import (
     scheduling_schedule_rule_create,
     scheduling_schedule_rule_update,
@@ -485,3 +497,135 @@ class BookingListCreateView(TenantContextMixin, APIView):
             message="created",
             status=status.HTTP_201_CREATED,
         )
+
+
+class TenantBookingSettingsView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="读取租户预约业务规则",
+        responses={200: enveloped_response_serializer(TenantBookingSettingsResponseSerializer)},
+    )
+    def get(self, request, *args, **kwargs):
+        """读取当前租户的预约业务规则。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含规则配置的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        settings = scheduling_booking_settings_get_for_tenant(tenant=tenant)
+        response_serializer = TenantBookingSettingsResponseSerializer(
+            scheduling_booking_settings_to_dict(settings=settings)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="更新租户预约业务规则",
+        request=TenantBookingSettingsUpdateRequestSerializer,
+        responses={200: enveloped_response_serializer(TenantBookingSettingsResponseSerializer)},
+    )
+    def patch(self, request, *args, **kwargs):
+        """更新当前租户的预约业务规则。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后规则的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        request_serializer = TenantBookingSettingsUpdateRequestSerializer(
+            data=request.data,
+            partial=True,
+        )
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            settings = scheduling_booking_settings_update(
+                tenant=tenant,
+                min_advance_minutes=validated_data.get("min_advance_minutes"),
+                max_booking_window_days=validated_data.get("max_booking_window_days"),
+                pending_retention_minutes=validated_data.get("pending_retention_minutes"),
+                cancel_deadline_minutes=validated_data.get("cancel_deadline_minutes"),
+                future_booking_limit=validated_data.get("future_booking_limit"),
+                confirmation_mode=validated_data.get("confirmation_mode"),
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = TenantBookingSettingsResponseSerializer(
+            scheduling_booking_settings_to_dict(settings=settings)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingConfirmView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="确认待处理预约",
+        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """将待确认预约转为已确认。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        booking_id = self.kwargs["booking_id"]
+        try:
+            booking = scheduling_booking_get_for_tenant(tenant=tenant, booking_id=booking_id)
+        except Booking.DoesNotExist as exc:
+            raise NotFound("预约不存在。") from exc
+
+        try:
+            booking = scheduling_booking_confirm(booking=booking)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+
+class BookingRejectView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    @extend_schema(
+        summary="拒绝待处理预约",
+        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """将待确认预约转为已拒绝并释放容量。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后预约的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        booking_id = self.kwargs["booking_id"]
+        try:
+            booking = scheduling_booking_get_for_tenant(tenant=tenant, booking_id=booking_id)
+        except Booking.DoesNotExist as exc:
+            raise NotFound("预约不存在。") from exc
+
+        try:
+            booking = scheduling_booking_reject(booking=booking)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = BookingResponseSerializer(
+            scheduling_booking_to_dict(tenant=tenant, booking=booking)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)

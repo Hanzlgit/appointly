@@ -14,6 +14,21 @@ urlpatterns = [
         name="scheduling-bookings",
     ),
     path(
+        "bookings/<int:booking_id>/confirm/",
+        views.BookingConfirmView.as_view(),
+        name="scheduling-booking-confirm",
+    ),
+    path(
+        "bookings/<int:booking_id>/reject/",
+        views.BookingRejectView.as_view(),
+        name="scheduling-booking-reject",
+    ),
+    path(
+        "booking-settings/",
+        views.TenantBookingSettingsView.as_view(),
+        name="scheduling-booking-settings",
+    ),
+    path(
         "rules/",
         views.ScheduleRuleListCreateView.as_view(),
         name="scheduling-rules",

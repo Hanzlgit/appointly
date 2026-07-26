@@ -285,6 +285,26 @@ def scheduling_booking_list_for_customer(
     )
 
 
+def scheduling_booking_settings_to_dict(*, settings) -> dict:
+    """将租户预约规则映射为 API 响应字典。
+
+    Args:
+        settings: ``TenantBookingSettings`` 实例。
+
+    Returns:
+        dict: 含规则字段的响应字典。
+    """
+    return {
+        "min_advance_minutes": settings.min_advance_minutes,
+        "max_booking_window_days": settings.max_booking_window_days,
+        "pending_retention_minutes": settings.pending_retention_minutes,
+        "cancel_deadline_minutes": settings.cancel_deadline_minutes,
+        "future_booking_limit": settings.future_booking_limit,
+        "confirmation_mode": settings.confirmation_mode,
+        "updated_at": settings.updated_at,
+    }
+
+
 def scheduling_booking_to_dict(*, tenant: Tenant, booking: Booking) -> dict:
     """将预约映射为 API 响应字典。
 
