@@ -82,6 +82,7 @@ from scheduling.services.booking_transition import (
 from scheduling.services.capacity_adjust import scheduling_timeslot_capacity_adjust
 from scheduling.services.schedule_rule import (
     scheduling_schedule_rule_create,
+    scheduling_schedule_rule_delete,
     scheduling_schedule_rule_update,
     scheduling_timeslots_batch_close,
 )
@@ -325,6 +326,50 @@ class ScheduleRuleUpdateView(TenantContextMixin, APIView):
             scheduling_schedule_rule_to_dict(rule=rule)
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(summary="删除周期排班规则", responses={204: None})
+    def delete(self, request, *args, **kwargs):
+        """删除排班规则；今日及之后无有效预约时关闭空闲时段并物理删除规则。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: HTTP 204 空响应；存在冲突预约时 HTTP 400。
+        """
+        tenant = self.get_tenant()
+        rule = self._get_rule()
+        before_value = {
+            "location_id": rule.location_id,
+            "resource_id": rule.resource_id,
+            "days_of_week": rule.days_of_week,
+            "start_time": str(rule.start_time),
+            "end_time": str(rule.end_time),
+            "slot_interval_minutes": rule.slot_interval_minutes,
+            "capacity": rule.capacity,
+            "is_active": rule.is_active,
+        }
+        rule_id = rule.id
+
+        try:
+            scheduling_schedule_rule_delete(tenant=tenant, rule=rule)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        http_context = audit_http_context(request=request)
+        audit_log_record(
+            tenant=tenant,
+            operator=http_context["operator"],
+            request_id=http_context["request_id"],
+            ip_address=http_context["ip_address"],
+            action=AuditAction.SCHEDULE_CHANGE,
+            target_type="schedule_rule",
+            target_id=rule_id,
+            before_value=before_value,
+            after_value=None,
+            details={"action": "delete"},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class TimeSlotCreateView(TenantContextMixin, APIView):

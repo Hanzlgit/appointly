@@ -424,6 +424,82 @@ class ScheduleRuleEffectiveDateTests(SchedulingAdminMixin, APITestCase):
         )
 
 
+class ScheduleRuleDeleteTests(SchedulingAdminMixin, APITestCase):
+    def test_admin_can_delete_schedule_rule_without_active_bookings(self):
+        """验证无有效预约时可删除排班规则。"""
+        rule_data = self._create_rule()
+        rule_id = rule_data["id"]
+
+        response = self.client.delete(f"/api/v1/acme/scheduling/rules/{rule_id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(ScheduleRule.objects.filter(id=rule_id).exists())
+
+    def test_delete_rejects_when_active_bookings_on_rule_slots_from_today(self):
+        """验证今日及之后规则时段存在有效预约时拒绝删除。"""
+        rule_data = self._create_rule()
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        tenant_tz = ZoneInfo("Asia/Shanghai")
+        today_local = timezone.now().astimezone(tenant_tz).date()
+        slot_start = datetime.combine(today_local, time(9, 0), tzinfo=tenant_tz).astimezone(UTC)
+        slot_end = datetime.combine(today_local, time(10, 0), tzinfo=tenant_tz).astimezone(UTC)
+        time_slot = TimeSlot.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            resource=self.resource,
+            schedule_rule=rule,
+            start=slot_start,
+            end=slot_end,
+            capacity=1,
+            status=TimeSlotStatus.OPEN,
+        )
+        booking_create_for_test(
+            tenant=self.tenant,
+            time_slot=time_slot,
+            idempotency_key="rule-delete-conflict",
+        )
+
+        response = self.client.delete(f"/api/v1/acme/scheduling/rules/{rule.id}/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("有效预约", api_message(response))
+        self.assertTrue(ScheduleRule.objects.filter(id=rule.id).exists())
+        time_slot.refresh_from_db()
+        self.assertEqual(time_slot.status, TimeSlotStatus.OPEN)
+
+    def test_delete_closes_open_idle_slots_from_today(self):
+        """验证删除规则后关闭今日及之后的空闲时段并解除规则关联。"""
+        rule_data = self._create_rule(days_of_week=[0, 1, 2, 3, 4, 5, 6])
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        tenant_tz = ZoneInfo("Asia/Shanghai")
+        today_local = timezone.now().astimezone(tenant_tz).date()
+        future_slot_start = datetime.combine(today_local, time(9, 0), tzinfo=tenant_tz).astimezone(
+            UTC
+        )
+        future_slot_end = datetime.combine(today_local, time(10, 0), tzinfo=tenant_tz).astimezone(
+            UTC
+        )
+        future_slot = TimeSlot.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            resource=self.resource,
+            schedule_rule=rule,
+            start=future_slot_start,
+            end=future_slot_end,
+            capacity=1,
+            status=TimeSlotStatus.OPEN,
+        )
+
+        response = self.client.delete(f"/api/v1/acme/scheduling/rules/{rule.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        future_slot.refresh_from_db()
+        self.assertEqual(future_slot.status, TimeSlotStatus.CLOSED)
+        self.assertIsNone(future_slot.schedule_rule_id)
+
+
 class SchedulingCeleryTaskTests(SchedulingAdminMixin, APITestCase):
     def test_celery_task_generates_timeslots_for_active_rules(self):
         """验证 Celery 任务可为活跃规则批量生成时段且幂等。"""

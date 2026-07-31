@@ -6,8 +6,11 @@ from django.db import transaction
 from django.utils import timezone as django_timezone
 from tenants.models import Tenant
 
-from scheduling.models import ScheduleRule, TimeSlot, TimeSlotStatus
-from scheduling.services.booking import scheduling_active_bookings_in_range
+from scheduling.models import Booking, ScheduleRule, TimeSlot, TimeSlotStatus
+from scheduling.services.booking import (
+    ACTIVE_BOOKING_STATUSES,
+    scheduling_active_bookings_in_range,
+)
 from scheduling.services.time_slot import scheduling_timeslots_generate_for_rule
 from scheduling.validation import scheduling_schedule_rule_window_validate
 
@@ -132,6 +135,77 @@ def scheduling_rule_has_active_bookings_from(
         resource_id=rule.resource_id,
     )
     return len(conflicts) > 0
+
+
+def scheduling_rule_has_active_bookings_on_rule_slots_from(
+    *,
+    tenant: Tenant,
+    rule: ScheduleRule,
+    effective_date: date,
+) -> bool:
+    """检查规则关联时段在生效日及之后是否存在有效预约。
+
+    Args:
+        tenant (Tenant): 目标租户。
+        rule (ScheduleRule): 排班规则。
+        effective_date (date): 生效日期（租户本地）。
+
+    Returns:
+        bool: 存在有效预约时返回 ``True``。
+    """
+    from zoneinfo import ZoneInfo
+
+    tenant_tz = ZoneInfo(tenant.timezone)
+    effective_start = django_timezone.datetime.combine(
+        effective_date,
+        django_timezone.datetime.min.time(),
+        tzinfo=tenant_tz,
+    ).astimezone(UTC)
+
+    return Booking.objects.filter(
+        tenant=tenant,
+        status__in=ACTIVE_BOOKING_STATUSES,
+        time_slot__schedule_rule=rule,
+        time_slot__start__gte=effective_start,
+    ).exists()
+
+
+@transaction.atomic
+def scheduling_schedule_rule_delete(
+    *,
+    tenant: Tenant,
+    rule: ScheduleRule,
+) -> None:
+    """删除排班规则并关闭今日及之后的空闲时段。
+
+    Args:
+        tenant (Tenant): 目标租户。
+        rule (ScheduleRule): 待删除规则。
+
+    Raises:
+        ValidationError: 规则不属于租户或今日及之后存在有效预约。
+    """
+    if rule.tenant_id != tenant.id:
+        raise ValidationError("排班规则不属于当前租户。")
+
+    from zoneinfo import ZoneInfo
+
+    tenant_tz = ZoneInfo(tenant.timezone)
+    today_local = django_timezone.now().astimezone(tenant_tz).date()
+
+    if scheduling_rule_has_active_bookings_on_rule_slots_from(
+        tenant=tenant,
+        rule=rule,
+        effective_date=today_local,
+    ):
+        raise ValidationError("今日及之后存在有效预约，无法删除规则。")
+
+    scheduling_timeslots_close_idle_from(
+        tenant=tenant,
+        effective_date=today_local,
+        schedule_rule=rule,
+    )
+    rule.delete()
 
 
 @transaction.atomic
