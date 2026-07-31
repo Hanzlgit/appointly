@@ -433,13 +433,20 @@ class CatalogPublicBrowseTests(APITestCase):
         self.assertEqual(catalog["locations"][0]["name"], "Open Branch")
         self.assertEqual(len(catalog["services"]), 1)
         self.assertEqual(catalog["services"][0]["name"], "Active Service")
-        self.assertEqual(catalog["services"][0]["location_ids"], [])
+        service = catalog["services"][0]
+        self.assertEqual(service["location_id"], self.active_location.id)
+        self.assertNotIn("location_ids", service)
 
-    def test_public_service_includes_location_ids_from_linked_resources(self):
-        """验证公开服务返回其资源所属地点列表。"""
+    def test_public_service_location_id_from_service_not_resources(self):
+        """验证公开服务 location_id 来自 Service.location，而非资源反推。"""
+        other_location = Location.objects.create(
+            tenant=self.tenant,
+            name="Other Branch",
+            is_active=True,
+        )
         resource = Resource.objects.create(
             tenant=self.tenant,
-            location=self.active_location,
+            location=other_location,
             name="Alice",
             is_active=True,
         )
@@ -450,7 +457,36 @@ class CatalogPublicBrowseTests(APITestCase):
 
         self.assertEqual(response.status_code, 200)
         services = api_data(response)["services"]
-        self.assertEqual(services[0]["location_ids"], [self.active_location.id])
+        self.assertEqual(services[0]["location_id"], self.active_location.id)
+
+    def test_public_services_scoped_by_location_id(self):
+        """验证各服务 location_id 对应其所属门店，可按门店语义过滤。"""
+        other_location = Location.objects.create(
+            tenant=self.tenant,
+            name="Second Branch",
+            is_active=True,
+        )
+        Service.objects.create(
+            tenant=self.tenant,
+            location=other_location,
+            name="Second Branch Service",
+            duration_minutes=60,
+            is_active=True,
+        )
+
+        response = self.client.get("/api/v1/acme/catalog/public/")
+
+        self.assertEqual(response.status_code, 200)
+        catalog = api_data(response)
+        self.assertEqual(len(catalog["locations"]), 2)
+        self.assertEqual(len(catalog["services"]), 2)
+
+        by_location: dict[int, list[str]] = {}
+        for svc in catalog["services"]:
+            by_location.setdefault(svc["location_id"], []).append(svc["name"])
+
+        self.assertEqual(by_location[self.active_location.id], ["Active Service"])
+        self.assertEqual(by_location[other_location.id], ["Second Branch Service"])
 
 
 class CatalogTenantIsolationTests(APITestCase):
