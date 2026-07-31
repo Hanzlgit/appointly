@@ -251,6 +251,16 @@ if SENTRY_DSN:
         send_default_pii=False,
     )
 
+OTEL_ENABLED = _env_bool("OTEL_ENABLED", default=False)
+OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "appointly-api")
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"
+)
+if OTEL_ENABLED:
+    from appointly.telemetry import setup_telemetry
+
+    setup_telemetry(service_name=OTEL_SERVICE_NAME)
+
 # 跨域白名单；生产环境在部署配置中设置，本地开发见 ``config/local/settings.example.py``。
 CORS_ALLOWED_ORIGINS: list[str] = []
 

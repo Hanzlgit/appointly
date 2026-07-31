@@ -1,5 +1,7 @@
 import uuid
 
+from appointly.telemetry import current_trace_id
+
 
 class RequestIdMiddleware:
     """为每个请求注入唯一 request_id 并在响应头中回传。"""
@@ -25,4 +27,8 @@ class RequestIdMiddleware:
         request.request_id = request_id
         response = self.get_response(request)
         response["X-Request-ID"] = request_id
+        trace_id = current_trace_id()
+        if trace_id:
+            request.trace_id = trace_id
+            response["X-Trace-ID"] = trace_id
         return response
