@@ -14,6 +14,16 @@ urlpatterns = [
         name="catalog-location-detail",
     ),
     path(
+        "locations/<int:location_id>/resources/",
+        views.CatalogLocationResourceListCreateView.as_view(),
+        name="catalog-location-resources",
+    ),
+    path(
+        "locations/<int:location_id>/resources/<int:resource_id>/",
+        views.CatalogLocationResourceRetrieveUpdateDestroyView.as_view(),
+        name="catalog-location-resource-detail",
+    ),
+    path(
         "services/",
         views.CatalogServiceListCreateView.as_view(),
         name="catalog-services",
@@ -22,16 +32,6 @@ urlpatterns = [
         "services/<int:service_id>/",
         views.CatalogServiceRetrieveUpdateDestroyView.as_view(),
         name="catalog-service-detail",
-    ),
-    path(
-        "resources/",
-        views.CatalogResourceListCreateView.as_view(),
-        name="catalog-resources",
-    ),
-    path(
-        "resources/<int:resource_id>/",
-        views.CatalogResourceRetrieveUpdateDestroyView.as_view(),
-        name="catalog-resource-detail",
     ),
     path(
         "public/",

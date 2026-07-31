@@ -1,6 +1,5 @@
 """为本地开发创建控制台测试账号。"""
 
-from catalog.models import Resource
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
@@ -14,12 +13,10 @@ ACCOUNTS = (
     {
         "username": "acme-admin",
         "role": TenantRole.TENANT_ADMIN,
-        "link_resource_name": None,
     },
     {
         "username": "acme-staff",
         "role": TenantRole.STAFF,
-        "link_resource_name": "Alice",
     },
 )
 
@@ -78,19 +75,6 @@ class Command(BaseCommand):
                     user=user,
                     defaults={"role": spec["role"]},
                 )
-
-                resource_name = spec["link_resource_name"]
-                if resource_name:
-                    resource = Resource.objects.filter(tenant=tenant, name=resource_name).first()
-                    if resource is None:
-                        self.stdout.write(
-                            self.style.WARNING(
-                                f"未找到资源 {resource_name!r}，跳过 {user.username} 的资源绑定。"
-                            )
-                        )
-                    elif resource.staff_user_id != user.id:
-                        resource.staff_user = user
-                        resource.save(update_fields=["staff_user", "updated_at"])
 
                 if created or membership_created:
                     created_users.append(user.username)

@@ -44,10 +44,9 @@ class BookingLifecycleTests(APITestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Haircut",

@@ -1,3 +1,5 @@
+from django.db.models import Count
+
 from tenants.models import Tenant
 
 from catalog.models import Location, Resource, Service
@@ -26,10 +28,12 @@ def catalog_location_list_for_tenant(*, tenant: Tenant) -> list[Location]:
         tenant (Tenant): 目标租户。
 
     Returns:
-        list[Location]: 服务地点列表。
+        list[Location]: 服务地点列表（含 ``resource_count`` 注解）。
     """
     return list(
-        Location.objects.filter(tenant=tenant).prefetch_related("resources").order_by("name"),
+        Location.objects.filter(tenant=tenant)
+        .annotate(resource_count=Count("resources"))
+        .order_by("name"),
     )
 
 
@@ -54,14 +58,18 @@ def catalog_location_to_dict(*, location: Location) -> dict[str, object]:
         location (Location): 服务地点实例。
 
     Returns:
-        dict[str, object]: 含 id、name、resource_ids 等字段的字典。
+        dict[str, object]: 含 id、name、resource_count 等字段的字典。
     """
+    resource_count = getattr(location, "resource_count", None)
+    if resource_count is None:
+        resource_count = location.resources.count()
+
     return {
         "id": location.id,
         "name": location.name,
         "address": location.address,
         "is_active": location.is_active,
-        "resource_ids": list(location.resources.values_list("id", flat=True)),
+        "resource_count": resource_count,
         "created_at": location.created_at,
         "updated_at": location.updated_at,
     }
@@ -108,7 +116,7 @@ def catalog_service_list_active_for_tenant(*, tenant: Tenant) -> list[Service]:
     """
     return list(
         Service.objects.filter(tenant=tenant, is_active=True)
-        .prefetch_related("resources__locations")
+        .prefetch_related("resources__location")
         .order_by("name"),
     )
 
@@ -136,34 +144,38 @@ def catalog_service_to_dict(*, service: Service) -> dict[str, object]:
     }
 
 
-def catalog_resource_get_for_tenant(*, tenant: Tenant, resource_id: int) -> Resource:
-    """按 ID 查询租户下的可预约资源。
+def catalog_resource_get_for_location(
+    *,
+    tenant: Tenant,
+    location: Location,
+    resource_id: int,
+) -> Resource:
+    """按 ID 查询指定地点下的可预约资源。
 
     Args:
         tenant (Tenant): 目标租户。
+        location (Location): 所属地点。
         resource_id (int): 资源 ID。
 
     Returns:
         Resource: 匹配的资源。
 
     Raises:
-        Resource.DoesNotExist: 资源不存在或不属于租户。
+        Resource.DoesNotExist: 资源不存在或不属于该地点。
     """
-    return Resource.objects.get(tenant=tenant, id=resource_id)
+    return Resource.objects.get(tenant=tenant, location=location, id=resource_id)
 
 
-def catalog_resource_list_for_tenant(*, tenant: Tenant) -> list[Resource]:
-    """列出租户下的可预约资源，按名称排序。
+def catalog_resource_list_for_location(*, location: Location) -> list[Resource]:
+    """列出指定地点下的可预约资源，按名称排序。
 
     Args:
-        tenant (Tenant): 目标租户。
+        location (Location): 服务地点。
 
     Returns:
         list[Resource]: 资源列表。
     """
-    return list(
-        Resource.objects.filter(tenant=tenant).prefetch_related("locations").order_by("name"),
-    )
+    return list(Resource.objects.filter(location=location).order_by("name"))
 
 
 def catalog_resource_to_dict(*, resource: Resource) -> dict[str, object]:
@@ -173,15 +185,13 @@ def catalog_resource_to_dict(*, resource: Resource) -> dict[str, object]:
         resource (Resource): 可预约资源实例。
 
     Returns:
-        dict[str, object]: 含 id、name、location_ids 等字段的字典。
+        dict[str, object]: 含 id、name、location_id 等字段的字典。
     """
     return {
         "id": resource.id,
         "name": resource.name,
-        "resource_type": resource.resource_type,
-        "staff_user_id": resource.staff_user_id,
+        "location_id": resource.location_id,
         "is_active": resource.is_active,
-        "location_ids": list(resource.locations.values_list("id", flat=True)),
         "created_at": resource.created_at,
         "updated_at": resource.updated_at,
     }
@@ -218,9 +228,9 @@ def catalog_public_service_location_ids(*, service: Service) -> list[int]:
     for resource in service.resources.all():
         if not resource.is_active:
             continue
-        for location in resource.locations.all():
-            if location.is_active:
-                location_ids.add(location.id)
+        location = resource.location
+        if location.is_active:
+            location_ids.add(location.id)
     return sorted(location_ids)
 
 

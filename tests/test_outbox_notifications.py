@@ -47,10 +47,9 @@ class OutboxBookingTransactionTests(TestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Haircut",
@@ -254,10 +253,9 @@ class InAppNotificationRecipientTests(APITestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Haircut",
@@ -446,10 +444,9 @@ class ReminderAndSmsTests(TestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Bob",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Cut",

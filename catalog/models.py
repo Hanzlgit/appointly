@@ -1,12 +1,4 @@
-from django.conf import settings
 from django.db import models
-
-
-class ResourceType(models.TextChoices):
-    STAFF = "staff", "工作人员"
-    ROOM = "room", "房间"
-    VENUE = "venue", "场地"
-    EQUIPMENT = "equipment", "设备"
 
 
 class Location(models.Model):
@@ -79,30 +71,22 @@ class Resource(models.Model):
         on_delete=models.CASCADE,
         related_name="resources",
     )
-    name = models.CharField(max_length=255)
-    resource_type = models.CharField(max_length=32, choices=ResourceType.choices)
-    staff_user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="catalog_resources",
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.CASCADE,
+        related_name="resources",
     )
+    name = models.CharField(max_length=255)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    locations = models.ManyToManyField(
-        Location,
-        related_name="resources",
-        blank=True,
-    )
 
     class Meta:
         ordering = ["name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "name"],
-                name="unique_tenant_resource_name",
+                fields=["tenant", "location", "name"],
+                name="unique_tenant_location_resource_name",
             ),
         ]
         verbose_name = "可预约资源"

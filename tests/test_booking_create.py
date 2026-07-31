@@ -44,10 +44,9 @@ class BookingCreateTests(APITestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Haircut",
@@ -201,15 +200,14 @@ class BookingCreateTests(APITestCase):
 
         heavy_resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Bob",
-            resource_type="staff",
         )
         light_resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Carol",
-            resource_type="staff",
         )
-        self.location.resources.add(heavy_resource, light_resource)
         self.service.resources.add(heavy_resource, light_resource)
 
         heavy_slot = TimeSlot.objects.create(
@@ -291,10 +289,9 @@ class BookingCreateConcurrencyTests(TransactionTestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Haircut",

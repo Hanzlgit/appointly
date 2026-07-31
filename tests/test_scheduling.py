@@ -33,10 +33,9 @@ class SchedulingAdminMixin:
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
 
         login_response = self.client.post(
             "/api/v1/auth/staff/sessions/",
@@ -108,10 +107,7 @@ class TimeSlotGenerationTests(SchedulingAdminMixin, APITestCase):
 
 class TimeSlotOverlapTests(SchedulingAdminMixin, APITestCase):
     def test_overlapping_timeslot_for_same_resource_is_rejected(self):
-        """验证同一资源重叠时段创建被拒绝（含跨地点）。"""
-        other_location = Location.objects.create(tenant=self.tenant, name="Branch B")
-        other_location.resources.add(self.resource)
-
+        """验证同一资源重叠时段创建被拒绝。"""
         tenant_tz = ZoneInfo("Asia/Shanghai")
         slot_start = datetime(2026, 7, 27, 9, 0, tzinfo=tenant_tz).astimezone(UTC)
         slot_end = datetime(2026, 7, 27, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
@@ -132,7 +128,7 @@ class TimeSlotOverlapTests(SchedulingAdminMixin, APITestCase):
         overlap_response = self.client.post(
             "/api/v1/acme/scheduling/time-slots/",
             {
-                "location_id": other_location.id,
+                "location_id": self.location.id,
                 "resource_id": self.resource.id,
                 "start": (slot_start + timedelta(minutes=30)).isoformat(),
                 "end": (slot_end + timedelta(minutes=30)).isoformat(),

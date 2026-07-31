@@ -324,19 +324,17 @@ def scheduling_phone_mask(*, phone: str) -> str:
 def scheduling_staff_resource_ids_for_user(*, tenant: Tenant, user: User) -> set[int]:
     """返回工作人员关联的资源 ID 集合。
 
+    Resource 模型已移除 ``staff_user`` 绑定；工作人员端资源过滤暂不可用。
+
     Args:
         tenant (Tenant): 目标租户。
         user (User): 工作人员用户。
 
     Returns:
-        set[int]: 关联资源 ID 集合。
+        set[int]: 关联资源 ID 集合（当前恒为空）。
     """
-    return set(
-        Resource.objects.filter(tenant=tenant, staff_user=user, is_active=True).values_list(
-            "id",
-            flat=True,
-        )
-    )
+    del tenant, user
+    return set()
 
 
 def scheduling_booking_list_for_staff(

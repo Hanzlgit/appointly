@@ -40,10 +40,9 @@ class AvailabilityQueryTests(APITestCase):
         self.location = Location.objects.create(tenant=self.tenant, name="Main Studio")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
         self.service = Service.objects.create(
             tenant=self.tenant,
             name="Haircut",
@@ -108,10 +107,9 @@ class AvailabilityQueryTests(APITestCase):
         """未指定资源时按服务、地点与时间聚合剩余容量。"""
         other_resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Bob",
-            resource_type="staff",
         )
-        self.location.resources.add(other_resource)
         self.service.resources.add(other_resource)
         TimeSlot.objects.create(
             tenant=self.tenant,

@@ -18,8 +18,8 @@ from catalog.selectors import (
     catalog_location_to_dict,
     catalog_public_location_to_dict,
     catalog_public_service_to_dict,
-    catalog_resource_get_for_tenant,
-    catalog_resource_list_for_tenant,
+    catalog_resource_get_for_location,
+    catalog_resource_list_for_location,
     catalog_resource_to_dict,
     catalog_service_get_for_tenant,
     catalog_service_list_active_for_tenant,
@@ -130,7 +130,6 @@ class CatalogLocationListCreateView(TenantContextMixin, APIView):
                 tenant=tenant,
                 name=validated_data["name"],
                 address=validated_data.get("address", ""),
-                resource_ids=validated_data.get("resource_ids"),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
@@ -211,7 +210,6 @@ class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
                 name=validated_data.get("name"),
                 address=validated_data.get("address"),
                 is_active=validated_data.get("is_active"),
-                resource_ids=validated_data.get("resource_ids"),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
@@ -235,6 +233,210 @@ class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         location = self._get_location()
         try:
             catalog_location_delete(tenant=tenant, location=location)
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class CatalogLocationResourceListCreateView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    def _get_location(self) -> Location:
+        """从 URL 解析并返回当前租户下的地点。
+
+        Returns:
+            Location: 匹配的服务地点。
+
+        Raises:
+            NotFound: 地点不存在。
+        """
+        tenant = self.get_tenant()
+        location_id = self.kwargs["location_id"]
+        try:
+            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+        except Location.DoesNotExist as exc:
+            raise NotFound("服务地点不存在。") from exc
+
+    @extend_schema(
+        summary="列出地点下的可预约资源",
+        responses={200: enveloped_response_serializer(CatalogResourceListResponseSerializer)},
+    )
+    def get(self, request, *args, **kwargs):
+        """列出指定地点下的可预约资源。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含 ``resources`` 列表的标准 envelope 响应。
+        """
+        location = self._get_location()
+        resources = catalog_resource_list_for_location(location=location)
+        response_serializer = CatalogResourceListResponseSerializer(
+            {
+                "resources": [
+                    CatalogResourceResponseSerializer(
+                        catalog_resource_to_dict(resource=resource)
+                    ).data
+                    for resource in resources
+                ],
+            }
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="在地点下创建可预约资源",
+        request=CatalogResourceCreateRequestSerializer,
+        responses={201: enveloped_response_serializer(CatalogResourceResponseSerializer)},
+    )
+    def post(self, request, *args, **kwargs):
+        """在指定地点下创建可预约资源。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含新资源的标准 envelope 响应，HTTP 201。
+        """
+        tenant = self.get_tenant()
+        location = self._get_location()
+        request_serializer = CatalogResourceCreateRequestSerializer(data=request.data)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            resource = catalog_resource_create(
+                tenant=tenant,
+                location=location,
+                name=validated_data["name"],
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = CatalogResourceResponseSerializer(
+            catalog_resource_to_dict(resource=resource)
+        )
+        return api_response(
+            request,
+            data=response_serializer.data,
+            message="created",
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CatalogLocationResourceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
+    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+
+    def _get_location(self) -> Location:
+        """从 URL 解析并返回当前租户下的地点。
+
+        Returns:
+            Location: 匹配的服务地点。
+
+        Raises:
+            NotFound: 地点不存在。
+        """
+        tenant = self.get_tenant()
+        location_id = self.kwargs["location_id"]
+        try:
+            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+        except Location.DoesNotExist as exc:
+            raise NotFound("服务地点不存在。") from exc
+
+    def _get_resource(self, *, location: Location) -> Resource:
+        """从 URL 解析并返回指定地点下的资源。
+
+        Args:
+            location (Location): 所属地点。
+
+        Returns:
+            Resource: 匹配的可预约资源。
+
+        Raises:
+            NotFound: 资源不存在。
+        """
+        tenant = self.get_tenant()
+        resource_id = self.kwargs["resource_id"]
+        try:
+            return catalog_resource_get_for_location(
+                tenant=tenant,
+                location=location,
+                resource_id=resource_id,
+            )
+        except Resource.DoesNotExist as exc:
+            raise NotFound("可预约资源不存在。") from exc
+
+    @extend_schema(
+        summary="获取地点下的可预约资源",
+        responses={200: enveloped_response_serializer(CatalogResourceResponseSerializer)},
+    )
+    def get(self, request, *args, **kwargs):
+        """获取指定地点下的单个可预约资源。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含资源字段的标准 envelope 响应。
+        """
+        location = self._get_location()
+        resource = self._get_resource(location=location)
+        response_serializer = CatalogResourceResponseSerializer(
+            catalog_resource_to_dict(resource=resource)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="更新地点下的可预约资源",
+        request=CatalogResourceUpdateRequestSerializer,
+        responses={200: enveloped_response_serializer(CatalogResourceResponseSerializer)},
+    )
+    def patch(self, request, *args, **kwargs):
+        """部分更新指定地点下的可预约资源。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: 含更新后资源的标准 envelope 响应。
+        """
+        tenant = self.get_tenant()
+        location = self._get_location()
+        resource = self._get_resource(location=location)
+        request_serializer = CatalogResourceUpdateRequestSerializer(data=request.data, partial=True)
+        request_serializer.is_valid(raise_exception=True)
+        validated_data = request_serializer.validated_data
+
+        try:
+            resource = catalog_resource_update(
+                tenant=tenant,
+                resource=resource,
+                name=validated_data.get("name"),
+                is_active=validated_data.get("is_active"),
+            )
+        except DjangoValidationError as exc:
+            _raise_drf_validation_error(exc)
+
+        response_serializer = CatalogResourceResponseSerializer(
+            catalog_resource_to_dict(resource=resource)
+        )
+        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(summary="删除地点下的可预约资源", responses={204: None})
+    def delete(self, request, *args, **kwargs):
+        """物理删除指定地点下未被引用的可预约资源。
+
+        Args:
+            request: DRF 请求对象。
+
+        Returns:
+            Response: HTTP 204 空响应。
+        """
+        tenant = self.get_tenant()
+        location = self._get_location()
+        resource = self._get_resource(location=location)
+        try:
+            catalog_resource_delete(tenant=tenant, resource=resource)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -403,176 +605,6 @@ class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         service = self._get_service()
         try:
             catalog_service_delete(tenant=tenant, service=service)
-        except DjangoValidationError as exc:
-            _raise_drf_validation_error(exc)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class CatalogResourceListCreateView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
-
-    @extend_schema(
-        summary="列出可预约资源",
-        responses={200: enveloped_response_serializer(CatalogResourceListResponseSerializer)},
-    )
-    def get(self, request, *args, **kwargs):
-        """列出租户下的可预约资源。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: 含 ``resources`` 列表的标准 envelope 响应。
-        """
-        tenant = self.get_tenant()
-        resources = catalog_resource_list_for_tenant(tenant=tenant)
-        response_serializer = CatalogResourceListResponseSerializer(
-            {
-                "resources": [
-                    CatalogResourceResponseSerializer(
-                        catalog_resource_to_dict(resource=resource)
-                    ).data
-                    for resource in resources
-                ],
-            }
-        )
-        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
-
-    @extend_schema(
-        summary="创建可预约资源",
-        request=CatalogResourceCreateRequestSerializer,
-        responses={201: enveloped_response_serializer(CatalogResourceResponseSerializer)},
-    )
-    def post(self, request, *args, **kwargs):
-        """在租户下创建可预约资源。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: 含新资源的标准 envelope 响应，HTTP 201。
-        """
-        tenant = self.get_tenant()
-        request_serializer = CatalogResourceCreateRequestSerializer(data=request.data)
-        request_serializer.is_valid(raise_exception=True)
-        validated_data = request_serializer.validated_data
-
-        try:
-            resource = catalog_resource_create(
-                tenant=tenant,
-                name=validated_data["name"],
-                resource_type=validated_data["resource_type"],
-                staff_user_id=validated_data.get("staff_user_id"),
-                location_ids=validated_data.get("location_ids"),
-            )
-        except DjangoValidationError as exc:
-            _raise_drf_validation_error(exc)
-
-        response_serializer = CatalogResourceResponseSerializer(
-            catalog_resource_to_dict(resource=resource)
-        )
-        return api_response(
-            request,
-            data=response_serializer.data,
-            message="created",
-            status=status.HTTP_201_CREATED,
-        )
-
-
-class CatalogResourceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
-
-    def _get_resource(self) -> Resource:
-        """从 URL 解析并返回当前租户下的资源。
-
-        Returns:
-            Resource: 匹配的可预约资源。
-
-        Raises:
-            NotFound: 资源不存在。
-        """
-        tenant = self.get_tenant()
-        resource_id = self.kwargs["resource_id"]
-        try:
-            return catalog_resource_get_for_tenant(tenant=tenant, resource_id=resource_id)
-        except Resource.DoesNotExist as exc:
-            raise NotFound("可预约资源不存在。") from exc
-
-    @extend_schema(
-        summary="获取可预约资源",
-        responses={200: enveloped_response_serializer(CatalogResourceResponseSerializer)},
-    )
-    def get(self, request, *args, **kwargs):
-        """获取单个可预约资源详情。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: 含资源字段的标准 envelope 响应。
-        """
-        resource = self._get_resource()
-        response_serializer = CatalogResourceResponseSerializer(
-            catalog_resource_to_dict(resource=resource)
-        )
-        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
-
-    @extend_schema(
-        summary="更新可预约资源",
-        request=CatalogResourceUpdateRequestSerializer,
-        responses={200: enveloped_response_serializer(CatalogResourceResponseSerializer)},
-    )
-    def patch(self, request, *args, **kwargs):
-        """部分更新可预约资源。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: 含更新后资源的标准 envelope 响应。
-        """
-        tenant = self.get_tenant()
-        resource = self._get_resource()
-        request_serializer = CatalogResourceUpdateRequestSerializer(data=request.data, partial=True)
-        request_serializer.is_valid(raise_exception=True)
-        validated_data = request_serializer.validated_data
-
-        staff_user_id = ...
-        if "staff_user_id" in validated_data:
-            staff_user_id = validated_data["staff_user_id"]
-
-        try:
-            resource = catalog_resource_update(
-                tenant=tenant,
-                resource=resource,
-                name=validated_data.get("name"),
-                resource_type=validated_data.get("resource_type"),
-                staff_user_id=staff_user_id,
-                is_active=validated_data.get("is_active"),
-                location_ids=validated_data.get("location_ids"),
-            )
-        except DjangoValidationError as exc:
-            _raise_drf_validation_error(exc)
-
-        response_serializer = CatalogResourceResponseSerializer(
-            catalog_resource_to_dict(resource=resource)
-        )
-        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
-
-    @extend_schema(summary="删除可预约资源", responses={204: None})
-    def delete(self, request, *args, **kwargs):
-        """物理删除未被引用的可预约资源。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: HTTP 204 空响应。
-        """
-        tenant = self.get_tenant()
-        resource = self._get_resource()
-        try:
-            catalog_resource_delete(tenant=tenant, resource=resource)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)

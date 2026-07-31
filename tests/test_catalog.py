@@ -44,17 +44,15 @@ class CatalogLocationCreateTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(location["name"], "Downtown Studio")
         self.assertEqual(location["address"], "123 Main St")
         self.assertTrue(location["is_active"])
-        self.assertEqual(location["resource_ids"], [])
+        self.assertEqual(location["resource_count"], 0)
 
 
 class CatalogLocationListTests(CatalogAdminMixin, APITestCase):
-    def test_tenant_admin_can_list_locations(self):
-        """验证租户管理员可列出服务地点。"""
-        self.client.post(
-            "/api/v1/acme/catalog/locations/",
-            {"name": "North Branch"},
-            format="json",
-        )
+    def test_tenant_admin_can_list_locations_with_resource_count(self):
+        """验证地点列表返回 resource_count。"""
+        location = Location.objects.create(tenant=self.tenant, name="North Branch")
+        Resource.objects.create(tenant=self.tenant, location=location, name="Room A")
+        Resource.objects.create(tenant=self.tenant, location=location, name="Room B")
 
         response = self.client.get("/api/v1/acme/catalog/locations/")
 
@@ -62,6 +60,7 @@ class CatalogLocationListTests(CatalogAdminMixin, APITestCase):
         locations = api_data(response)["locations"]
         self.assertEqual(len(locations), 1)
         self.assertEqual(locations[0]["name"], "North Branch")
+        self.assertEqual(locations[0]["resource_count"], 2)
 
 
 class CatalogLocationUpdateTests(CatalogAdminMixin, APITestCase):
@@ -147,63 +146,135 @@ class CatalogServiceTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(service["resource_ids"], [])
 
 
-class CatalogResourceTests(CatalogAdminMixin, APITestCase):
+class CatalogLocationResourceTests(CatalogAdminMixin, APITestCase):
     def setUp(self):
-        """准备租户管理员与 staff 用户。"""
+        """准备租户、管理员、两个地点。"""
         super().setUp()
-        self.staff_user = User.objects.create_user(username="stylist", password="StrongPass123!")
-        TenantMembership.objects.create(
-            tenant=self.tenant,
-            user=self.staff_user,
-            role=TenantRole.STAFF,
-        )
+        self.location_a = Location.objects.create(tenant=self.tenant, name="Branch A")
+        self.location_b = Location.objects.create(tenant=self.tenant, name="Branch B")
 
-    def test_tenant_admin_can_create_resource_with_optional_staff_user(self):
-        """验证租户管理员可创建资源并可选关联工作人员。"""
+    def test_tenant_admin_can_create_resource_under_location(self):
+        """验证可在地点下创建资源，响应含 location_id。"""
         response = self.client.post(
-            "/api/v1/acme/catalog/resources/",
-            {
-                "name": "Alice",
-                "resource_type": "staff",
-                "staff_user_id": self.staff_user.id,
-            },
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+            {"name": "Alice"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 201)
         resource = api_data(response)
         self.assertEqual(resource["name"], "Alice")
-        self.assertEqual(resource["resource_type"], "staff")
-        self.assertEqual(resource["staff_user_id"], self.staff_user.id)
+        self.assertEqual(resource["location_id"], self.location_a.id)
+        self.assertTrue(resource["is_active"])
+        self.assertNotIn("resource_type", resource)
+        self.assertNotIn("staff_user_id", resource)
+        self.assertNotIn("location_ids", resource)
+
+    def test_tenant_admin_can_list_update_and_delete_location_resources(self):
+        """验证地点下资源 CRUD 闭环。"""
+        create_response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+            {"name": "Room A"},
+            format="json",
+        )
+        resource_id = api_data(create_response)["id"]
+
+        list_response = self.client.get(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+        )
+        self.assertEqual(list_response.status_code, 200)
+        resources = api_data(list_response)["resources"]
+        self.assertEqual(len(resources), 1)
+        self.assertEqual(resources[0]["name"], "Room A")
+
+        patch_response = self.client.patch(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/{resource_id}/",
+            {"name": "Room A Updated", "is_active": False},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        updated = api_data(patch_response)
+        self.assertEqual(updated["name"], "Room A Updated")
+        self.assertFalse(updated["is_active"])
+
+        delete_response = self.client.delete(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/{resource_id}/",
+        )
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Resource.objects.filter(id=resource_id).exists())
+
+    def test_same_name_allowed_across_locations(self):
+        """验证不同地点下允许同名资源。"""
+        response_a = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+            {"name": "Alice"},
+            format="json",
+        )
+        response_b = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_b.id}/resources/",
+            {"name": "Alice"},
+            format="json",
+        )
+
+        self.assertEqual(response_a.status_code, 201)
+        self.assertEqual(response_b.status_code, 201)
+
+    def test_duplicate_name_within_same_location_rejected(self):
+        """验证同地点下同名资源冲突。"""
+        self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+            {"name": "Alice"},
+            format="json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+            {"name": "Alice"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_resource_not_accessible_under_wrong_location(self):
+        """验证资源不能通过错误地点 URL 访问。"""
+        create_response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/resources/",
+            {"name": "Alice"},
+            format="json",
+        )
+        resource_id = api_data(create_response)["id"]
+
+        response = self.client.get(
+            f"/api/v1/acme/catalog/locations/{self.location_b.id}/resources/{resource_id}/",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_global_resources_endpoint_removed(self):
+        """验证租户级全局资源端点已移除。"""
+        response = self.client.get("/api/v1/acme/catalog/resources/")
+        self.assertEqual(response.status_code, 404)
 
 
 class CatalogM2MTests(CatalogAdminMixin, APITestCase):
-    def test_location_and_service_can_link_resources(self):
-        """验证地点与服务均可配置资源多对多关联。"""
-        resource_response = self.client.post(
-            "/api/v1/acme/catalog/resources/",
-            {"name": "Room A", "resource_type": "room"},
-            format="json",
+    def test_service_can_link_location_resources(self):
+        """验证服务可关联同租户资源。"""
+        location = Location.objects.create(tenant=self.tenant, name="Main Hall")
+        resource = Resource.objects.create(
+            tenant=self.tenant,
+            location=location,
+            name="Room A",
         )
-        resource_id = api_data(resource_response)["id"]
-
-        location_response = self.client.post(
-            "/api/v1/acme/catalog/locations/",
-            {"name": "Main Hall", "resource_ids": [resource_id]},
-            format="json",
-        )
-        self.assertEqual(api_data(location_response)["resource_ids"], [resource_id])
 
         service_response = self.client.post(
             "/api/v1/acme/catalog/services/",
             {
                 "name": "Consultation",
                 "duration_minutes": 60,
-                "resource_ids": [resource_id],
+                "resource_ids": [resource.id],
             },
             format="json",
         )
-        self.assertEqual(api_data(service_response)["resource_ids"], [resource_id])
+        self.assertEqual(api_data(service_response)["resource_ids"], [resource.id])
 
 
 class CatalogPublicBrowseTests(APITestCase):
@@ -245,11 +316,10 @@ class CatalogPublicBrowseTests(APITestCase):
         """验证公开服务返回其资源所属地点列表。"""
         resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.active_location,
             name="Alice",
-            resource_type="staff",
             is_active=True,
         )
-        resource.locations.add(self.active_location)
         service = Service.objects.get(tenant=self.tenant, name="Active Service")
         service.resources.add(resource)
 
@@ -271,7 +341,8 @@ class CatalogTenantIsolationTests(APITestCase):
             user=self.admin_a,
             role=TenantRole.TENANT_ADMIN,
         )
-        Location.objects.create(tenant=self.tenant_a, name="A Location")
+        self.location_a = Location.objects.create(tenant=self.tenant_a, name="A Location")
+        self.location_b = Location.objects.create(tenant=self.tenant_b, name="B Location")
         login_response = self.client.post(
             "/api/v1/auth/staff/sessions/",
             {"login": "admin-a", "password": "StrongPass123!"},
@@ -289,7 +360,7 @@ class CatalogTenantIsolationTests(APITestCase):
 
     def test_tenant_admin_only_sees_own_locations(self):
         """验证租户管理员只能看到所属租户地点。"""
-        Location.objects.create(tenant=self.tenant_b, name="B Location")
+        Location.objects.create(tenant=self.tenant_b, name="Extra B Location")
 
         response = self.client.get("/api/v1/tenant-a/catalog/locations/")
 
@@ -297,6 +368,13 @@ class CatalogTenantIsolationTests(APITestCase):
         locations = api_data(response)["locations"]
         self.assertEqual(len(locations), 1)
         self.assertEqual(locations[0]["name"], "A Location")
+
+    def test_tenant_admin_cannot_access_other_tenant_nested_resources(self):
+        """验证租户管理员无法访问其他租户地点下嵌套资源端点。"""
+        response = self.client.get(
+            f"/api/v1/tenant-b/catalog/locations/{self.location_b.id}/resources/",
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class CatalogTimezoneTests(CatalogAdminMixin, APITestCase):

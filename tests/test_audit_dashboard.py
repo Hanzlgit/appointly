@@ -62,17 +62,14 @@ class AuditDashboardTests(APITestCase):
         self.other_location = Location.objects.create(tenant=self.tenant, name="Branch")
         self.resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Alice",
-            resource_type="staff",
-            staff_user=self.staff,
         )
         self.other_resource = Resource.objects.create(
             tenant=self.tenant,
+            location=self.other_location,
             name="Bob",
-            resource_type="staff",
         )
-        self.location.resources.add(self.resource)
-        self.other_location.resources.add(self.other_resource)
 
         self.service = Service.objects.create(
             tenant=self.tenant,
