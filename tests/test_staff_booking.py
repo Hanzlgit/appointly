@@ -210,8 +210,8 @@ class StaffBookingTests(APITestCase):
         self.assertEqual(entries[0]["target_id"], booking_id)
         self.assertTrue(entries[0]["details"]["skipped_contact_otp"])
 
-    def test_staff_cannot_create_booking_for_unlinked_resource(self):
-        """工作人员不能为未关联资源代建预约。"""
+    def test_staff_can_create_booking_for_any_resource(self):
+        """工作人员可为任意资源代建预约（不再依赖 staff_user 绑定）。"""
         self._as_staff()
         now = self.slot_start - timedelta(days=1)
         with patch("django.utils.timezone.now", return_value=now):
@@ -221,12 +221,11 @@ class StaffBookingTests(APITestCase):
                 customer_id=self.existing_customer.id,
             )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("无权", api_message(response))
-        self.assertEqual(Booking.objects.count(), 0)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(api_data(response)["resource_id"], self.other_resource.id)
 
-    def test_staff_can_create_booking_for_linked_resource(self):
-        """工作人员可为关联资源代建预约。"""
+    def test_staff_can_create_booking_for_resource(self):
+        """工作人员可为资源代建预约。"""
         self._as_staff()
         now = self.slot_start - timedelta(days=1)
         with patch("django.utils.timezone.now", return_value=now):
@@ -238,8 +237,8 @@ class StaffBookingTests(APITestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(api_data(response)["resource_id"], self.resource.id)
 
-    def test_admin_sees_all_tenant_bookings_staff_sees_linked_only(self):
-        """管理员看全部预约，工作人员仅看关联资源。"""
+    def test_admin_and_staff_see_all_tenant_bookings(self):
+        """管理员与工作人员均可查看租户全部预约。"""
         booking_create_for_test(
             tenant=self.tenant,
             time_slot=self.time_slot,
@@ -268,8 +267,7 @@ class StaffBookingTests(APITestCase):
         staff_response = self.client.get("/api/v1/acme/scheduling/staff/bookings/")
         self.assertEqual(staff_response.status_code, 200)
         staff_bookings = api_data(staff_response)["bookings"]
-        self.assertEqual(len(staff_bookings), 1)
-        self.assertEqual(staff_bookings[0]["resource_id"], self.resource.id)
+        self.assertEqual(len(staff_bookings), 2)
 
     def test_over_capacity_staff_create_rejected(self):
         """超容量代建被拒绝。"""

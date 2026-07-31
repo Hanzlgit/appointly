@@ -108,6 +108,29 @@ class CatalogLocationDeleteTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Location.objects.filter(id=location_id).exists())
 
+    def test_delete_location_cascades_services_and_resources(self):
+        """验证删除地点时其下服务与资源一并物理删除。"""
+        location = Location.objects.create(tenant=self.tenant, name="Cascade Location")
+        resource = Resource.objects.create(
+            tenant=self.tenant,
+            location=location,
+            name="Room A",
+        )
+        service = Service.objects.create(
+            tenant=self.tenant,
+            location=location,
+            name="Haircut",
+            duration_minutes=30,
+        )
+        service.resources.add(resource)
+
+        response = self.client.delete(f"/api/v1/acme/catalog/locations/{location.id}/")
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Location.objects.filter(id=location.id).exists())
+        self.assertFalse(Resource.objects.filter(id=resource.id).exists())
+        self.assertFalse(Service.objects.filter(id=service.id).exists())
+
     def test_referenced_location_cannot_be_deleted_but_can_be_deactivated(self):
         """验证被引用的地点不能物理删除，但可以停用。"""
         create_response = self.client.post(
@@ -125,6 +148,40 @@ class CatalogLocationDeleteTests(CatalogAdminMixin, APITestCase):
 
         patch_response = self.client.patch(
             f"/api/v1/acme/catalog/locations/{location_id}/",
+            {"is_active": False},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertFalse(api_data(patch_response)["is_active"])
+
+    def test_location_with_scheduling_reference_cannot_be_deleted(self):
+        """验证存在排班或未完成预约的地点不能物理删除，但可以停用。"""
+        from datetime import UTC, datetime
+
+        from scheduling.models import TimeSlot, TimeSlotStatus
+
+        location = Location.objects.create(tenant=self.tenant, name="Scheduled Location")
+        resource = Resource.objects.create(
+            tenant=self.tenant,
+            location=location,
+            name="Alice",
+        )
+        TimeSlot.objects.create(
+            tenant=self.tenant,
+            location=location,
+            resource=resource,
+            start=datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+            end=datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+            status=TimeSlotStatus.OPEN,
+        )
+
+        delete_response = self.client.delete(f"/api/v1/acme/catalog/locations/{location.id}/")
+        self.assertEqual(delete_response.status_code, 400)
+        self.assertEqual(api_message(delete_response), "该地点存在排班或未完成预约，只能停用。")
+        self.assertTrue(Location.objects.filter(id=location.id).exists())
+
+        patch_response = self.client.patch(
+            f"/api/v1/acme/catalog/locations/{location.id}/",
             {"is_active": False},
             format="json",
         )

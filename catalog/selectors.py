@@ -118,36 +118,6 @@ def catalog_service_list_for_location(*, location: Location) -> list[Service]:
     )
 
 
-def catalog_service_get_for_tenant(*, tenant: Tenant, service_id: int) -> Service:
-    """按 ID 查询租户下的服务项目。
-
-    Args:
-        tenant (Tenant): 目标租户。
-        service_id (int): 服务 ID。
-
-    Returns:
-        Service: 匹配的服务项目。
-
-    Raises:
-        Service.DoesNotExist: 服务不存在或不属于租户。
-    """
-    return Service.objects.get(tenant=tenant, id=service_id)
-
-
-def catalog_service_list_for_tenant(*, tenant: Tenant) -> list[Service]:
-    """列出租户下的服务项目，按名称排序。
-
-    Args:
-        tenant (Tenant): 目标租户。
-
-    Returns:
-        list[Service]: 服务项目列表。
-    """
-    return list(
-        Service.objects.filter(tenant=tenant).prefetch_related("resources").order_by("name"),
-    )
-
-
 def catalog_service_list_active_for_tenant(*, tenant: Tenant) -> list[Service]:
     """列出租户下启用的服务项目。
 
