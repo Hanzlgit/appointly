@@ -35,6 +35,11 @@ class Service(models.Model):
         on_delete=models.CASCADE,
         related_name="services",
     )
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.CASCADE,
+        related_name="services",
+    )
     name = models.CharField(max_length=255)
     description = models.TextField(blank=True, default="")
     duration_minutes = models.PositiveIntegerField()
@@ -53,8 +58,8 @@ class Service(models.Model):
         ordering = ["name"]
         constraints = [
             models.UniqueConstraint(
-                fields=["tenant", "name"],
-                name="unique_tenant_service_name",
+                fields=["tenant", "location", "name"],
+                name="unique_tenant_location_service_name",
             ),
         ]
         verbose_name = "服务项目"

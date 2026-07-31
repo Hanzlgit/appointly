@@ -21,9 +21,9 @@ from catalog.selectors import (
     catalog_resource_get_for_location,
     catalog_resource_list_for_location,
     catalog_resource_to_dict,
-    catalog_service_get_for_tenant,
+    catalog_service_get_for_location,
     catalog_service_list_active_for_tenant,
-    catalog_service_list_for_tenant,
+    catalog_service_list_for_location,
     catalog_service_to_dict,
 )
 from catalog.serializers import (
@@ -442,15 +442,31 @@ class CatalogLocationResourceRetrieveUpdateDestroyView(TenantContextMixin, APIVi
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CatalogServiceListCreateView(TenantContextMixin, APIView):
+class CatalogLocationServiceListCreateView(TenantContextMixin, APIView):
     permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
 
+    def _get_location(self) -> Location:
+        """从 URL 解析并返回当前租户下的地点。
+
+        Returns:
+            Location: 匹配的服务地点。
+
+        Raises:
+            NotFound: 地点不存在。
+        """
+        tenant = self.get_tenant()
+        location_id = self.kwargs["location_id"]
+        try:
+            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+        except Location.DoesNotExist as exc:
+            raise NotFound("服务地点不存在。") from exc
+
     @extend_schema(
-        summary="列出服务项目",
+        summary="列出地点下的服务项目",
         responses={200: enveloped_response_serializer(CatalogServiceListResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """列出租户下的服务项目。
+        """列出指定地点下的服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -458,8 +474,8 @@ class CatalogServiceListCreateView(TenantContextMixin, APIView):
         Returns:
             Response: 含 ``services`` 列表的标准 envelope 响应。
         """
-        tenant = self.get_tenant()
-        services = catalog_service_list_for_tenant(tenant=tenant)
+        location = self._get_location()
+        services = catalog_service_list_for_location(location=location)
         response_serializer = CatalogServiceListResponseSerializer(
             {
                 "services": [
@@ -471,12 +487,12 @@ class CatalogServiceListCreateView(TenantContextMixin, APIView):
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="创建服务项目",
+        summary="在地点下创建服务项目",
         request=CatalogServiceCreateRequestSerializer,
         responses={201: enveloped_response_serializer(CatalogServiceResponseSerializer)},
     )
     def post(self, request, *args, **kwargs):
-        """在租户下创建服务项目。
+        """在指定地点下创建服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -485,6 +501,7 @@ class CatalogServiceListCreateView(TenantContextMixin, APIView):
             Response: 含新服务的标准 envelope 响应，HTTP 201。
         """
         tenant = self.get_tenant()
+        location = self._get_location()
         request_serializer = CatalogServiceCreateRequestSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
@@ -492,6 +509,7 @@ class CatalogServiceListCreateView(TenantContextMixin, APIView):
         try:
             service = catalog_service_create(
                 tenant=tenant,
+                location=location,
                 name=validated_data["name"],
                 description=validated_data.get("description", ""),
                 duration_minutes=validated_data["duration_minutes"],
@@ -513,11 +531,30 @@ class CatalogServiceListCreateView(TenantContextMixin, APIView):
         )
 
 
-class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
+class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
     permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
 
-    def _get_service(self) -> Service:
-        """从 URL 解析并返回当前租户下的服务。
+    def _get_location(self) -> Location:
+        """从 URL 解析并返回当前租户下的地点。
+
+        Returns:
+            Location: 匹配的服务地点。
+
+        Raises:
+            NotFound: 地点不存在。
+        """
+        tenant = self.get_tenant()
+        location_id = self.kwargs["location_id"]
+        try:
+            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+        except Location.DoesNotExist as exc:
+            raise NotFound("服务地点不存在。") from exc
+
+    def _get_service(self, *, location: Location) -> Service:
+        """从 URL 解析并返回指定地点下的服务。
+
+        Args:
+            location (Location): 所属地点。
 
         Returns:
             Service: 匹配的服务项目。
@@ -528,16 +565,20 @@ class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         tenant = self.get_tenant()
         service_id = self.kwargs["service_id"]
         try:
-            return catalog_service_get_for_tenant(tenant=tenant, service_id=service_id)
+            return catalog_service_get_for_location(
+                tenant=tenant,
+                location=location,
+                service_id=service_id,
+            )
         except Service.DoesNotExist as exc:
             raise NotFound("服务项目不存在。") from exc
 
     @extend_schema(
-        summary="获取服务项目",
+        summary="获取地点下的服务项目",
         responses={200: enveloped_response_serializer(CatalogServiceResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """获取单个服务项目详情。
+        """获取指定地点下的单个服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -545,19 +586,20 @@ class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         Returns:
             Response: 含服务字段的标准 envelope 响应。
         """
-        service = self._get_service()
+        location = self._get_location()
+        service = self._get_service(location=location)
         response_serializer = CatalogServiceResponseSerializer(
             catalog_service_to_dict(service=service)
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="更新服务项目",
+        summary="更新地点下的服务项目",
         request=CatalogServiceUpdateRequestSerializer,
         responses={200: enveloped_response_serializer(CatalogServiceResponseSerializer)},
     )
     def patch(self, request, *args, **kwargs):
-        """部分更新服务项目。
+        """部分更新指定地点下的服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -566,7 +608,8 @@ class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
             Response: 含更新后服务的标准 envelope 响应。
         """
         tenant = self.get_tenant()
-        service = self._get_service()
+        location = self._get_location()
+        service = self._get_service(location=location)
         request_serializer = CatalogServiceUpdateRequestSerializer(data=request.data, partial=True)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
@@ -591,9 +634,9 @@ class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
-    @extend_schema(summary="删除服务项目", responses={204: None})
+    @extend_schema(summary="删除地点下的服务项目", responses={204: None})
     def delete(self, request, *args, **kwargs):
-        """物理删除未被引用的服务项目。
+        """物理删除指定地点下未被引用的服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -602,7 +645,8 @@ class CatalogServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
             Response: HTTP 204 空响应。
         """
         tenant = self.get_tenant()
-        service = self._get_service()
+        location = self._get_location()
+        service = self._get_service(location=location)
         try:
             catalog_service_delete(tenant=tenant, service=service)
         except DjangoValidationError as exc:

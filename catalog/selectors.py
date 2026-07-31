@@ -32,7 +32,10 @@ def catalog_location_list_for_tenant(*, tenant: Tenant) -> list[Location]:
     """
     return list(
         Location.objects.filter(tenant=tenant)
-        .annotate(resource_count=Count("resources"))
+        .annotate(
+            resource_count=Count("resources", distinct=True),
+            service_count=Count("services", distinct=True),
+        )
         .order_by("name"),
     )
 
@@ -63,6 +66,9 @@ def catalog_location_to_dict(*, location: Location) -> dict[str, object]:
     resource_count = getattr(location, "resource_count", None)
     if resource_count is None:
         resource_count = location.resources.count()
+    service_count = getattr(location, "service_count", None)
+    if service_count is None:
+        service_count = location.services.count()
 
     return {
         "id": location.id,
@@ -70,9 +76,46 @@ def catalog_location_to_dict(*, location: Location) -> dict[str, object]:
         "address": location.address,
         "is_active": location.is_active,
         "resource_count": resource_count,
+        "service_count": service_count,
         "created_at": location.created_at,
         "updated_at": location.updated_at,
     }
+
+
+def catalog_service_get_for_location(
+    *,
+    tenant: Tenant,
+    location: Location,
+    service_id: int,
+) -> Service:
+    """按 ID 查询指定地点下的服务项目。
+
+    Args:
+        tenant (Tenant): 目标租户。
+        location (Location): 所属地点。
+        service_id (int): 服务 ID。
+
+    Returns:
+        Service: 匹配的服务项目。
+
+    Raises:
+        Service.DoesNotExist: 服务不存在或不属于该地点。
+    """
+    return Service.objects.get(tenant=tenant, location=location, id=service_id)
+
+
+def catalog_service_list_for_location(*, location: Location) -> list[Service]:
+    """列出指定地点下的服务项目，按名称排序。
+
+    Args:
+        location (Location): 服务地点。
+
+    Returns:
+        list[Service]: 服务项目列表。
+    """
+    return list(
+        Service.objects.filter(location=location).prefetch_related("resources").order_by("name"),
+    )
 
 
 def catalog_service_get_for_tenant(*, tenant: Tenant, service_id: int) -> Service:
@@ -138,6 +181,7 @@ def catalog_service_to_dict(*, service: Service) -> dict[str, object]:
         "price_cents": service.price_cents,
         "currency": service.currency,
         "is_active": service.is_active,
+        "location_id": service.location_id,
         "resource_ids": list(service.resources.values_list("id", flat=True)),
         "created_at": service.created_at,
         "updated_at": service.updated_at,

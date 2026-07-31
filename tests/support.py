@@ -84,6 +84,7 @@ def booking_create_for_test(
         if service is None:
             service = Service.objects.create(
                 tenant=tenant,
+                location=time_slot.location,
                 name="Test Service",
                 duration_minutes=60,
             )

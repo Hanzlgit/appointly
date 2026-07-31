@@ -45,14 +45,21 @@ class CatalogLocationCreateTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(location["address"], "123 Main St")
         self.assertTrue(location["is_active"])
         self.assertEqual(location["resource_count"], 0)
+        self.assertEqual(location["service_count"], 0)
 
 
 class CatalogLocationListTests(CatalogAdminMixin, APITestCase):
-    def test_tenant_admin_can_list_locations_with_resource_count(self):
-        """验证地点列表返回 resource_count。"""
+    def test_tenant_admin_can_list_locations_with_resource_and_service_count(self):
+        """验证地点列表返回 resource_count 与 service_count。"""
         location = Location.objects.create(tenant=self.tenant, name="North Branch")
         Resource.objects.create(tenant=self.tenant, location=location, name="Room A")
         Resource.objects.create(tenant=self.tenant, location=location, name="Room B")
+        Service.objects.create(
+            tenant=self.tenant,
+            location=location,
+            name="Haircut",
+            duration_minutes=30,
+        )
 
         response = self.client.get("/api/v1/acme/catalog/locations/")
 
@@ -61,6 +68,7 @@ class CatalogLocationListTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(len(locations), 1)
         self.assertEqual(locations[0]["name"], "North Branch")
         self.assertEqual(locations[0]["resource_count"], 2)
+        self.assertEqual(locations[0]["service_count"], 1)
 
 
 class CatalogLocationUpdateTests(CatalogAdminMixin, APITestCase):
@@ -124,11 +132,17 @@ class CatalogLocationDeleteTests(CatalogAdminMixin, APITestCase):
         self.assertFalse(api_data(patch_response)["is_active"])
 
 
-class CatalogServiceTests(CatalogAdminMixin, APITestCase):
-    def test_tenant_admin_can_create_service(self):
-        """验证租户管理员可创建服务项目。"""
+class CatalogLocationServiceTests(CatalogAdminMixin, APITestCase):
+    def setUp(self):
+        """准备租户、管理员、两个地点。"""
+        super().setUp()
+        self.location_a = Location.objects.create(tenant=self.tenant, name="Branch A")
+        self.location_b = Location.objects.create(tenant=self.tenant, name="Branch B")
+
+    def test_tenant_admin_can_create_service_under_location(self):
+        """验证可在地点下创建服务，响应含 location_id。"""
         response = self.client.post(
-            "/api/v1/acme/catalog/services/",
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
             {
                 "name": "Haircut",
                 "description": "Standard cut",
@@ -143,7 +157,136 @@ class CatalogServiceTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(service["name"], "Haircut")
         self.assertEqual(service["duration_minutes"], 30)
         self.assertEqual(service["price_cents"], 5000)
+        self.assertEqual(service["location_id"], self.location_a.id)
         self.assertEqual(service["resource_ids"], [])
+
+    def test_tenant_admin_can_list_update_and_delete_location_services(self):
+        """验证地点下服务 CRUD 闭环。"""
+        create_response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {
+                "name": "Consultation",
+                "duration_minutes": 60,
+            },
+            format="json",
+        )
+        service_id = api_data(create_response)["id"]
+
+        list_response = self.client.get(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+        )
+        self.assertEqual(list_response.status_code, 200)
+        services = api_data(list_response)["services"]
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0]["name"], "Consultation")
+
+        patch_response = self.client.patch(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/{service_id}/",
+            {"name": "Consultation Updated", "is_active": False},
+            format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        updated = api_data(patch_response)
+        self.assertEqual(updated["name"], "Consultation Updated")
+        self.assertFalse(updated["is_active"])
+
+        delete_response = self.client.delete(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/{service_id}/",
+        )
+        self.assertEqual(delete_response.status_code, 204)
+        self.assertFalse(Service.objects.filter(id=service_id).exists())
+
+    def test_service_can_link_same_location_resources(self):
+        """验证服务可关联同地点资源。"""
+        resource = Resource.objects.create(
+            tenant=self.tenant,
+            location=self.location_a,
+            name="Room A",
+        )
+
+        service_response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {
+                "name": "Consultation",
+                "duration_minutes": 60,
+                "resource_ids": [resource.id],
+            },
+            format="json",
+        )
+        self.assertEqual(service_response.status_code, 201)
+        self.assertEqual(api_data(service_response)["resource_ids"], [resource.id])
+
+    def test_cross_location_resource_link_rejected(self):
+        """验证跨地点关联资源返回 400。"""
+        resource_b = Resource.objects.create(
+            tenant=self.tenant,
+            location=self.location_b,
+            name="Room B",
+        )
+
+        response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {
+                "name": "Consultation",
+                "duration_minutes": 60,
+                "resource_ids": [resource_b.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(api_message(response), "关联资源必须属于同一地点。")
+
+    def test_same_name_allowed_across_locations(self):
+        """验证不同地点下允许同名服务。"""
+        response_a = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {"name": "Haircut", "duration_minutes": 30},
+            format="json",
+        )
+        response_b = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_b.id}/services/",
+            {"name": "Haircut", "duration_minutes": 45},
+            format="json",
+        )
+
+        self.assertEqual(response_a.status_code, 201)
+        self.assertEqual(response_b.status_code, 201)
+
+    def test_duplicate_name_within_same_location_rejected(self):
+        """验证同地点下同名服务冲突。"""
+        self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {"name": "Haircut", "duration_minutes": 30},
+            format="json",
+        )
+
+        response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {"name": "Haircut", "duration_minutes": 45},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_service_not_accessible_under_wrong_location(self):
+        """验证服务不能通过错误地点 URL 访问。"""
+        create_response = self.client.post(
+            f"/api/v1/acme/catalog/locations/{self.location_a.id}/services/",
+            {"name": "Haircut", "duration_minutes": 30},
+            format="json",
+        )
+        service_id = api_data(create_response)["id"]
+
+        response = self.client.get(
+            f"/api/v1/acme/catalog/locations/{self.location_b.id}/services/{service_id}/",
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_global_services_endpoint_removed(self):
+        """验证租户级全局服务端点已移除。"""
+        response = self.client.get("/api/v1/acme/catalog/services/")
+        self.assertEqual(response.status_code, 404)
 
 
 class CatalogLocationResourceTests(CatalogAdminMixin, APITestCase):
@@ -255,28 +398,6 @@ class CatalogLocationResourceTests(CatalogAdminMixin, APITestCase):
         self.assertEqual(response.status_code, 404)
 
 
-class CatalogM2MTests(CatalogAdminMixin, APITestCase):
-    def test_service_can_link_location_resources(self):
-        """验证服务可关联同租户资源。"""
-        location = Location.objects.create(tenant=self.tenant, name="Main Hall")
-        resource = Resource.objects.create(
-            tenant=self.tenant,
-            location=location,
-            name="Room A",
-        )
-
-        service_response = self.client.post(
-            "/api/v1/acme/catalog/services/",
-            {
-                "name": "Consultation",
-                "duration_minutes": 60,
-                "resource_ids": [resource.id],
-            },
-            format="json",
-        )
-        self.assertEqual(api_data(service_response)["resource_ids"], [resource.id])
-
-
 class CatalogPublicBrowseTests(APITestCase):
     def setUp(self):
         """准备租户与目录数据。"""
@@ -289,12 +410,14 @@ class CatalogPublicBrowseTests(APITestCase):
         Location.objects.create(tenant=self.tenant, name="Closed Branch", is_active=False)
         Service.objects.create(
             tenant=self.tenant,
+            location=self.active_location,
             name="Active Service",
             duration_minutes=30,
             is_active=True,
         )
         Service.objects.create(
             tenant=self.tenant,
+            location=self.active_location,
             name="Inactive Service",
             duration_minutes=45,
             is_active=False,

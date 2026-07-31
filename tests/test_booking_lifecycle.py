@@ -49,6 +49,7 @@ class BookingLifecycleTests(APITestCase):
         )
         self.service = Service.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Haircut",
             duration_minutes=60,
         )

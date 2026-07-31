@@ -52,6 +52,7 @@ class OutboxBookingTransactionTests(TestCase):
         )
         self.service = Service.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Haircut",
             duration_minutes=60,
         )
@@ -258,6 +259,7 @@ class InAppNotificationRecipientTests(APITestCase):
         )
         self.service = Service.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Haircut",
             duration_minutes=60,
         )
@@ -449,6 +451,7 @@ class ReminderAndSmsTests(TestCase):
         )
         self.service = Service.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Cut",
             duration_minutes=60,
         )

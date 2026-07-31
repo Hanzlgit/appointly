@@ -18,6 +18,7 @@ class CatalogLocationResponseSerializer(serializers.Serializer):
     address = serializers.CharField()
     is_active = serializers.BooleanField()
     resource_count = serializers.IntegerField()
+    service_count = serializers.IntegerField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
 
@@ -57,6 +58,7 @@ class CatalogServiceResponseSerializer(serializers.Serializer):
     price_cents = serializers.IntegerField()
     currency = serializers.CharField()
     is_active = serializers.BooleanField()
+    location_id = serializers.IntegerField()
     resource_ids = serializers.ListField(child=serializers.IntegerField())
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()

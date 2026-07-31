@@ -2,13 +2,14 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from tenants.models import Tenant
 
-from catalog.models import Resource, Service
+from catalog.models import Location, Resource, Service
 
 
 @transaction.atomic
 def catalog_service_create(
     *,
     tenant: Tenant,
+    location: Location,
     name: str,
     duration_minutes: int,
     description: str = "",
@@ -16,11 +17,12 @@ def catalog_service_create(
     currency: str = "CNY",
     resource_ids: list[int] | None = None,
 ) -> Service:
-    """在租户下创建服务项目。
+    """在指定地点下创建服务项目。
 
     Args:
         tenant (Tenant): 目标租户。
-        name (str): 服务名称，租户内唯一。
+        location (Location): 所属地点。
+        name (str): 服务名称，同地点内唯一。
         duration_minutes (int): 展示时长（分钟）。
         description (str): 服务说明。
         price_cents (int): 价格（分）。
@@ -31,10 +33,14 @@ def catalog_service_create(
         Service: 新创建的服务项目。
 
     Raises:
-        ValidationError: 字段无效或资源不存在。
+        ValidationError: 字段无效或资源不属于同一地点。
     """
+    if location.tenant_id != tenant.id:
+        raise ValidationError("地点不属于当前租户。")
+
     service = Service(
         tenant=tenant,
+        location=location,
         name=name,
         description=description,
         duration_minutes=duration_minutes,
@@ -46,6 +52,7 @@ def catalog_service_create(
     if resource_ids is not None:
         catalog_service_set_resources(
             tenant=tenant,
+            location=location,
             service=service,
             resource_ids=resource_ids,
         )
@@ -82,7 +89,7 @@ def catalog_service_update(
         Service: 更新后的服务项目。
 
     Raises:
-        ValidationError: 字段无效或资源不存在。
+        ValidationError: 字段无效或资源不属于同一地点。
     """
     if service.tenant_id != tenant.id:
         raise ValidationError("服务不属于当前租户。")
@@ -106,6 +113,7 @@ def catalog_service_update(
     if resource_ids is not None:
         catalog_service_set_resources(
             tenant=tenant,
+            location=service.location,
             service=service,
             resource_ids=resource_ids,
         )
@@ -116,22 +124,29 @@ def catalog_service_update(
 def catalog_service_set_resources(
     *,
     tenant: Tenant,
+    location: Location,
     service: Service,
     resource_ids: list[int],
 ) -> None:
-    """设置服务关联的资源列表。
+    """设置服务关联的资源列表，资源须属于同一地点。
 
     Args:
         tenant (Tenant): 目标租户。
+        location (Location): 服务所属地点。
         service (Service): 服务项目。
         resource_ids (list[int]): 资源 ID 列表。
 
     Raises:
-        ValidationError: 资源不存在或不属于当前租户。
+        ValidationError: 资源不存在、不属于租户或跨地点关联。
     """
     resources = list(Resource.objects.filter(tenant=tenant, id__in=resource_ids))
     if len(resources) != len(set(resource_ids)):
         raise ValidationError("存在无效或不属于当前租户的资源。")
+
+    cross_location = [resource.id for resource in resources if resource.location_id != location.id]
+    if cross_location:
+        raise ValidationError("关联资源必须属于同一地点。")
+
     service.resources.set(resources)
 
 

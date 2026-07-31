@@ -73,11 +73,13 @@ class AuditDashboardTests(APITestCase):
 
         self.service = Service.objects.create(
             tenant=self.tenant,
+            location=self.location,
             name="Haircut",
             duration_minutes=60,
         )
         self.other_service = Service.objects.create(
             tenant=self.tenant,
+            location=self.other_location,
             name="Color",
             duration_minutes=90,
         )
