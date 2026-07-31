@@ -45,6 +45,7 @@ from scheduling.serializers import (
     BookingRescheduleRequestSerializer,
     BookingResponseSerializer,
     ScheduleRuleCreateRequestSerializer,
+    ScheduleRuleListQuerySerializer,
     ScheduleRuleListResponseSerializer,
     ScheduleRuleResponseSerializer,
     ScheduleRuleUpdateRequestSerializer,
@@ -84,7 +85,11 @@ from scheduling.services.schedule_rule import (
     scheduling_schedule_rule_update,
     scheduling_timeslots_batch_close,
 )
-from scheduling.services.time_slot import scheduling_timeslot_close, scheduling_timeslot_create
+from scheduling.services.time_slot import (
+    scheduling_timeslot_close,
+    scheduling_timeslot_create,
+    scheduling_timeslots_generate_for_rule,
+)
 
 
 def _raise_drf_validation_error(exc: DjangoValidationError) -> None:
@@ -162,10 +167,11 @@ class ScheduleRuleListCreateView(TenantContextMixin, APIView):
 
     @extend_schema(
         summary="列出周期排班规则",
+        parameters=[ScheduleRuleListQuerySerializer],
         responses={200: enveloped_response_serializer(ScheduleRuleListResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """列出租户下的周期排班规则。
+        """列出租户下的周期排班规则，可按资源过滤。
 
         Args:
             request: DRF 请求对象。
@@ -174,7 +180,14 @@ class ScheduleRuleListCreateView(TenantContextMixin, APIView):
             Response: 含 ``rules`` 列表的标准 envelope 响应。
         """
         tenant = self.get_tenant()
-        rules = scheduling_schedule_rule_list_for_tenant(tenant=tenant)
+        query_serializer = ScheduleRuleListQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        query_data = query_serializer.validated_data
+
+        rules = scheduling_schedule_rule_list_for_tenant(
+            tenant=tenant,
+            resource_id=query_data.get("resource_id"),
+        )
         response_serializer = ScheduleRuleListResponseSerializer(
             {
                 "rules": [
@@ -212,10 +225,13 @@ class ScheduleRuleListCreateView(TenantContextMixin, APIView):
                 days_of_week=validated_data["days_of_week"],
                 start_time=validated_data["start_time"],
                 end_time=validated_data["end_time"],
+                slot_interval_minutes=validated_data["slot_interval_minutes"],
                 capacity=validated_data["capacity"],
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
+
+        scheduling_timeslots_generate_for_rule(tenant=tenant, rule=rule)
 
         response_serializer = ScheduleRuleResponseSerializer(
             scheduling_schedule_rule_to_dict(rule=rule)
@@ -281,6 +297,7 @@ class ScheduleRuleUpdateView(TenantContextMixin, APIView):
                 days_of_week=validated_data.get("days_of_week"),
                 start_time=validated_data.get("start_time"),
                 end_time=validated_data.get("end_time"),
+                slot_interval_minutes=validated_data.get("slot_interval_minutes"),
                 capacity=validated_data.get("capacity"),
                 is_active=validated_data.get("is_active"),
             )

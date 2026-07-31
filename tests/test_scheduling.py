@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from catalog.models import Location, Resource
@@ -82,8 +82,92 @@ class ScheduleRuleCreateTests(SchedulingAdminMixin, APITestCase):
         self.assertEqual(rule["days_of_week"], [0, 2, 4])
         self.assertEqual(rule["start_time"], "09:00:00")
         self.assertEqual(rule["end_time"], "10:00:00")
+        self.assertEqual(rule["slot_interval_minutes"], 30)
         self.assertEqual(rule["capacity"], 3)
         self.assertTrue(rule["is_active"])
+
+
+class ScheduleRuleListTests(SchedulingAdminMixin, APITestCase):
+    def test_list_rules_filters_by_resource_id(self):
+        """验证列表 API 可按 resource_id 过滤。"""
+        created = self._create_rule()
+        other_resource = Resource.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            name="Bob",
+        )
+        self._create_rule(resource_id=other_resource.id)
+
+        response = self.client.get(
+            "/api/v1/acme/scheduling/rules/",
+            {"resource_id": self.resource.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        rules = api_data(response)["rules"]
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0]["id"], created["id"])
+
+
+class ScheduleRuleValidationTests(SchedulingAdminMixin, APITestCase):
+    def test_create_rejects_window_not_divisible_by_interval(self):
+        """验证营业窗口无法被间隔整除时拒绝创建。"""
+        response = self.client.post(
+            "/api/v1/acme/scheduling/rules/",
+            {
+                "location_id": self.location.id,
+                "resource_id": self.resource.id,
+                "days_of_week": [0],
+                "start_time": "09:00",
+                "end_time": "09:50",
+                "slot_interval_minutes": 30,
+                "capacity": 1,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("整除", api_message(response))
+
+    def test_create_rejects_invalid_slot_interval(self):
+        """验证非法时段间隔值返回 400。"""
+        response = self.client.post(
+            "/api/v1/acme/scheduling/rules/",
+            {
+                "location_id": self.location.id,
+                "resource_id": self.resource.id,
+                "days_of_week": [0],
+                "start_time": "09:00",
+                "end_time": "10:00",
+                "slot_interval_minutes": 20,
+                "capacity": 1,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+
+class ScheduleRuleSlotSplitTests(SchedulingAdminMixin, APITestCase):
+    def test_create_sync_generates_split_timeslots_for_window(self):
+        """验证创建规则后同步按间隔切分并生成固定时段。"""
+        rule_data = self._create_rule(
+            days_of_week=[0],
+            start_time="09:00",
+            end_time="12:00",
+            slot_interval_minutes=30,
+        )
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        tenant_tz = ZoneInfo("Asia/Shanghai")
+        today_local = timezone.now().astimezone(tenant_tz).date()
+        while today_local.weekday() != 0:
+            today_local += timedelta(days=1)
+
+        slots = TimeSlot.objects.filter(schedule_rule=rule, start__date=today_local)
+        self.assertEqual(slots.count(), 6)
+        first_start = datetime.combine(today_local, time(9, 0), tzinfo=tenant_tz).astimezone(UTC)
+        self.assertTrue(slots.filter(start=first_start).exists())
 
 
 class TimeSlotGenerationTests(SchedulingAdminMixin, APITestCase):
@@ -94,15 +178,29 @@ class TimeSlotGenerationTests(SchedulingAdminMixin, APITestCase):
 
         tenant_tz = ZoneInfo("Asia/Shanghai")
         today_local = timezone.now().astimezone(tenant_tz).date()
+        end_local = today_local + timedelta(days=6)
+        slot_count = TimeSlot.objects.filter(
+            schedule_rule=rule,
+            start__date__gte=today_local,
+            start__date__lte=end_local,
+        ).count()
+
+        self.assertEqual(slot_count, 14)
         created_count = scheduling_timeslots_generate_for_rule(
             tenant=self.tenant,
             rule=rule,
             from_date=today_local,
-            to_date=today_local + timedelta(days=6),
+            to_date=end_local,
         )
-
-        self.assertEqual(created_count, 7)
-        self.assertEqual(TimeSlot.objects.filter(schedule_rule=rule).count(), 7)
+        self.assertEqual(created_count, 0)
+        self.assertEqual(
+            TimeSlot.objects.filter(
+                schedule_rule=rule,
+                start__date__gte=today_local,
+                start__date__lte=end_local,
+            ).count(),
+            14,
+        )
 
 
 class TimeSlotOverlapTests(SchedulingAdminMixin, APITestCase):
@@ -315,7 +413,7 @@ class ScheduleRuleEffectiveDateTests(SchedulingAdminMixin, APITestCase):
         self.assertEqual(old_slot.status, TimeSlotStatus.CLOSED)
 
         new_slot_start = datetime(2026, 8, 20, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
-        new_slot_end = datetime(2026, 8, 20, 11, 0, tzinfo=tenant_tz).astimezone(UTC)
+        new_slot_end = datetime(2026, 8, 20, 10, 30, tzinfo=tenant_tz).astimezone(UTC)
         self.assertTrue(
             TimeSlot.objects.filter(
                 schedule_rule=rule,
@@ -331,9 +429,12 @@ class SchedulingCeleryTaskTests(SchedulingAdminMixin, APITestCase):
         """验证 Celery 任务可为活跃规则批量生成时段且幂等。"""
         self._create_rule(days_of_week=[0, 1, 2, 3, 4, 5, 6])
 
-        created_total = scheduling_generate_timeslots_for_all_tenants()
-        self.assertGreater(created_total, 0)
         initial_count = TimeSlot.objects.filter(tenant=self.tenant).count()
+        self.assertGreater(initial_count, 0)
+
+        created_total = scheduling_generate_timeslots_for_all_tenants()
+        self.assertEqual(created_total, 0)
+        self.assertEqual(TimeSlot.objects.filter(tenant=self.tenant).count(), initial_count)
 
         created_again = scheduling_generate_timeslots_for_all_tenants()
         self.assertEqual(created_again, 0)

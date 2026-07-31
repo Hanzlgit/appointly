@@ -1,4 +1,7 @@
+from django.core.exceptions import ValidationError
 from django.db import models
+
+from scheduling.constants import ALLOWED_SLOT_INTERVAL_MINUTES, DEFAULT_SLOT_INTERVAL_MINUTES
 
 
 class TimeSlotStatus(models.TextChoices):
@@ -48,6 +51,9 @@ class ScheduleRule(models.Model):
     days_of_week = models.JSONField(default=list)
     start_time = models.TimeField()
     end_time = models.TimeField()
+    slot_interval_minutes = models.PositiveSmallIntegerField(
+        default=DEFAULT_SLOT_INTERVAL_MINUTES,
+    )
     capacity = models.PositiveIntegerField(default=1)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -57,6 +63,21 @@ class ScheduleRule(models.Model):
         ordering = ["id"]
         verbose_name = "周期排班规则"
         verbose_name_plural = "周期排班规则"
+
+    def clean(self) -> None:
+        """校验时段间隔与营业窗口整除关系。"""
+        super().clean()
+        if self.slot_interval_minutes not in ALLOWED_SLOT_INTERVAL_MINUTES:
+            raise ValidationError(
+                {"slot_interval_minutes": "时段间隔必须为 15、30、45 或 60 分钟。"}
+            )
+        from scheduling.validation import scheduling_schedule_rule_window_validate
+
+        scheduling_schedule_rule_window_validate(
+            start_time=self.start_time,
+            end_time=self.end_time,
+            slot_interval_minutes=self.slot_interval_minutes,
+        )
 
     def __str__(self) -> str:
         """返回规则简要标识。"""

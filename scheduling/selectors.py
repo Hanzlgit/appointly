@@ -34,20 +34,24 @@ def scheduling_schedule_rule_get_for_tenant(
     )
 
 
-def scheduling_schedule_rule_list_for_tenant(*, tenant: Tenant) -> list[ScheduleRule]:
-    """列出租户下全部排班规则。
+def scheduling_schedule_rule_list_for_tenant(
+    *,
+    tenant: Tenant,
+    resource_id: int | None = None,
+) -> list[ScheduleRule]:
+    """列出租户下排班规则，可按资源过滤。
 
     Args:
         tenant (Tenant): 目标租户。
+        resource_id (int | None): 可选资源 ID 过滤。
 
     Returns:
         list[ScheduleRule]: 排班规则列表。
     """
-    return list(
-        ScheduleRule.objects.filter(tenant=tenant)
-        .select_related("location", "resource")
-        .order_by("id")
-    )
+    queryset = ScheduleRule.objects.filter(tenant=tenant).select_related("location", "resource")
+    if resource_id is not None:
+        queryset = queryset.filter(resource_id=resource_id)
+    return list(queryset.order_by("id"))
 
 
 def scheduling_time_slot_get_for_tenant(*, tenant: Tenant, time_slot_id: int) -> TimeSlot:
@@ -85,6 +89,7 @@ def scheduling_schedule_rule_to_dict(*, rule: ScheduleRule) -> dict:
         "days_of_week": rule.days_of_week,
         "start_time": rule.start_time.isoformat(),
         "end_time": rule.end_time.isoformat(),
+        "slot_interval_minutes": rule.slot_interval_minutes,
         "capacity": rule.capacity,
         "is_active": rule.is_active,
         "created_at": rule.created_at,

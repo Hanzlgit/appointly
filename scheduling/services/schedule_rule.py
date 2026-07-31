@@ -9,6 +9,7 @@ from tenants.models import Tenant
 from scheduling.models import ScheduleRule, TimeSlot, TimeSlotStatus
 from scheduling.services.booking import scheduling_active_bookings_in_range
 from scheduling.services.time_slot import scheduling_timeslots_generate_for_rule
+from scheduling.validation import scheduling_schedule_rule_window_validate
 
 
 def _validate_schedule_rule_refs(
@@ -51,6 +52,7 @@ def scheduling_schedule_rule_create(
     start_time,
     end_time,
     capacity: int,
+    slot_interval_minutes: int = 30,
 ) -> ScheduleRule:
     """创建周期排班规则。
 
@@ -62,6 +64,7 @@ def scheduling_schedule_rule_create(
         start_time: 本地开始时间。
         end_time: 本地结束时间。
         capacity (int): 时段容量。
+        slot_interval_minutes (int): 时段间隔（分钟）。
 
     Returns:
         ScheduleRule: 新创建的排班规则。
@@ -74,10 +77,13 @@ def scheduling_schedule_rule_create(
         location_id=location_id,
         resource_id=resource_id,
     )
-    if start_time >= end_time:
-        raise ValidationError("结束时间必须晚于开始时间。")
     if not days_of_week:
         raise ValidationError("至少选择一个生效星期。")
+    scheduling_schedule_rule_window_validate(
+        start_time=start_time,
+        end_time=end_time,
+        slot_interval_minutes=slot_interval_minutes,
+    )
 
     rule = ScheduleRule(
         tenant=tenant,
@@ -86,6 +92,7 @@ def scheduling_schedule_rule_create(
         days_of_week=sorted(set(days_of_week)),
         start_time=start_time,
         end_time=end_time,
+        slot_interval_minutes=slot_interval_minutes,
         capacity=capacity,
     )
     rule.full_clean()
@@ -139,6 +146,7 @@ def scheduling_schedule_rule_update(
     start_time=None,
     end_time=None,
     capacity: int | None = None,
+    slot_interval_minutes: int | None = None,
     is_active: bool | None = None,
 ) -> ScheduleRule:
     """变更排班规则并在生效日重新生成时段。
@@ -153,6 +161,7 @@ def scheduling_schedule_rule_update(
         start_time: 新开始时间。
         end_time: 新结束时间。
         capacity (int | None): 新容量。
+        slot_interval_minutes (int | None): 新时段间隔（分钟）。
         is_active (bool | None): 启用状态。
 
     Returns:
@@ -189,11 +198,16 @@ def scheduling_schedule_rule_update(
         rule.end_time = end_time
     if capacity is not None:
         rule.capacity = capacity
+    if slot_interval_minutes is not None:
+        rule.slot_interval_minutes = slot_interval_minutes
     if is_active is not None:
         rule.is_active = is_active
 
-    if rule.start_time >= rule.end_time:
-        raise ValidationError("结束时间必须晚于开始时间。")
+    scheduling_schedule_rule_window_validate(
+        start_time=rule.start_time,
+        end_time=rule.end_time,
+        slot_interval_minutes=rule.slot_interval_minutes,
+    )
 
     rule.full_clean()
     rule.save()

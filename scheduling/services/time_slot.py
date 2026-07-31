@@ -9,6 +9,7 @@ from tenants.models import Tenant
 
 from scheduling.constants import MAX_BOOKING_WINDOW_DAYS, SLOT_GENERATION_BUFFER_DAYS
 from scheduling.models import ScheduleRule, TimeSlot, TimeSlotStatus
+from scheduling.validation import scheduling_slot_times_in_window
 
 
 def _local_slot_bounds(
@@ -187,32 +188,38 @@ def scheduling_timeslots_generate_for_rule(
     current_date = start_date
     while current_date <= end_date:
         if current_date.weekday() in allowed_weekdays:
-            slot_start, slot_end = _local_slot_bounds(
-                tenant=tenant,
-                slot_date=current_date,
+            slot_times = scheduling_slot_times_in_window(
                 start_time=rule.start_time,
                 end_time=rule.end_time,
+                slot_interval_minutes=rule.slot_interval_minutes,
             )
-            exists = TimeSlot.objects.filter(
-                resource=rule.resource,
-                start=slot_start,
-                end=slot_end,
-            ).exists()
-            if not exists and not scheduling_resource_has_overlap(
-                resource=rule.resource,
-                start=slot_start,
-                end=slot_end,
-            ):
-                scheduling_timeslot_create(
+            for slot_start_time, slot_end_time in slot_times:
+                slot_start, slot_end = _local_slot_bounds(
                     tenant=tenant,
-                    location=rule.location,
+                    slot_date=current_date,
+                    start_time=slot_start_time,
+                    end_time=slot_end_time,
+                )
+                exists = TimeSlot.objects.filter(
                     resource=rule.resource,
                     start=slot_start,
                     end=slot_end,
-                    capacity=rule.capacity,
-                    schedule_rule=rule,
-                )
-                created_count += 1
+                ).exists()
+                if not exists and not scheduling_resource_has_overlap(
+                    resource=rule.resource,
+                    start=slot_start,
+                    end=slot_end,
+                ):
+                    scheduling_timeslot_create(
+                        tenant=tenant,
+                        location=rule.location,
+                        resource=rule.resource,
+                        start=slot_start,
+                        end=slot_end,
+                        capacity=rule.capacity,
+                        schedule_rule=rule,
+                    )
+                    created_count += 1
         current_date += timedelta(days=1)
 
     return created_count

@@ -1,5 +1,11 @@
 from rest_framework import serializers
 
+from scheduling.constants import ALLOWED_SLOT_INTERVAL_MINUTES, DEFAULT_SLOT_INTERVAL_MINUTES
+
+
+class ScheduleRuleListQuerySerializer(serializers.Serializer):
+    resource_id = serializers.IntegerField(required=False, allow_null=True)
+
 
 class ScheduleRuleCreateRequestSerializer(serializers.Serializer):
     location_id = serializers.IntegerField()
@@ -10,6 +16,10 @@ class ScheduleRuleCreateRequestSerializer(serializers.Serializer):
     )
     start_time = serializers.TimeField()
     end_time = serializers.TimeField()
+    slot_interval_minutes = serializers.ChoiceField(
+        choices=ALLOWED_SLOT_INTERVAL_MINUTES,
+        default=DEFAULT_SLOT_INTERVAL_MINUTES,
+    )
     capacity = serializers.IntegerField(min_value=1)
 
 
@@ -23,6 +33,10 @@ class ScheduleRuleUpdateRequestSerializer(serializers.Serializer):
     )
     start_time = serializers.TimeField(required=False)
     end_time = serializers.TimeField(required=False)
+    slot_interval_minutes = serializers.ChoiceField(
+        choices=ALLOWED_SLOT_INTERVAL_MINUTES,
+        required=False,
+    )
     capacity = serializers.IntegerField(min_value=1, required=False)
     is_active = serializers.BooleanField(required=False)
 
@@ -34,6 +48,7 @@ class ScheduleRuleResponseSerializer(serializers.Serializer):
     days_of_week = serializers.ListField(child=serializers.IntegerField())
     start_time = serializers.CharField()
     end_time = serializers.CharField()
+    slot_interval_minutes = serializers.IntegerField()
     capacity = serializers.IntegerField()
     is_active = serializers.BooleanField()
     created_at = serializers.DateTimeField()
