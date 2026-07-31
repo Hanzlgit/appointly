@@ -4,6 +4,7 @@ from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
+from catalog.models import Location, Resource, Service
 from tenants.models import Tenant, TenantMembership, TenantRole
 
 DEFAULT_TENANT_SLUG = "acme"
@@ -17,6 +18,35 @@ ACCOUNTS = (
     {
         "username": "acme-staff",
         "role": TenantRole.STAFF,
+    },
+)
+
+CATALOG_DEMO = (
+    {
+        "location": {"name": "Main Studio", "address": "123 Main St"},
+        "resources": ("Alice", "Bob"),
+        "services": (
+            {
+                "name": "Haircut",
+                "description": "Standard haircut",
+                "duration_minutes": 60,
+                "price_cents": 8800,
+                "resource_names": ("Alice", "Bob"),
+            },
+        ),
+    },
+    {
+        "location": {"name": "North Branch", "address": "456 North Ave"},
+        "resources": ("Room A",),
+        "services": (
+            {
+                "name": "Consultation",
+                "description": "Initial consultation",
+                "duration_minutes": 30,
+                "price_cents": 0,
+                "resource_names": ("Room A",),
+            },
+        ),
     },
 )
 
@@ -85,6 +115,8 @@ class Command(BaseCommand):
                     f"  {user.username} @ {tenant.slug} ({membership.role})"
                 )
 
+            self._seed_catalog_demo(tenant=tenant)
+
         self.stdout.write(self.style.SUCCESS("\n控制台测试账号已就绪："))
         for spec in ACCOUNTS:
             self.stdout.write(f"  用户名: {spec['username']}")
@@ -97,3 +129,55 @@ class Command(BaseCommand):
             self.stdout.write(self.style.SUCCESS(f"新建: {', '.join(created_users)}"))
         if updated_users:
             self.stdout.write(f"已更新密码/成员关系: {', '.join(updated_users)}")
+
+    def _seed_catalog_demo(self, *, tenant: Tenant) -> None:
+        """创建地点 scoped 的 catalog 演示数据。
+
+        Args:
+            tenant (Tenant): 目标租户。
+        """
+        for demo in CATALOG_DEMO:
+            location, _created = Location.objects.get_or_create(
+                tenant=tenant,
+                name=demo["location"]["name"],
+                defaults={
+                    "address": demo["location"]["address"],
+                    "is_active": True,
+                },
+            )
+            if not _created and location.address != demo["location"]["address"]:
+                location.address = demo["location"]["address"]
+                location.save(update_fields=["address", "updated_at"])
+
+            resources_by_name: dict[str, Resource] = {}
+            for resource_name in demo["resources"]:
+                resource, _ = Resource.objects.get_or_create(
+                    tenant=tenant,
+                    location=location,
+                    name=resource_name,
+                    defaults={"is_active": True},
+                )
+                resources_by_name[resource_name] = resource
+
+            for service_spec in demo["services"]:
+                service, _ = Service.objects.get_or_create(
+                    tenant=tenant,
+                    location=location,
+                    name=service_spec["name"],
+                    defaults={
+                        "description": service_spec["description"],
+                        "duration_minutes": service_spec["duration_minutes"],
+                        "price_cents": service_spec["price_cents"],
+                        "is_active": True,
+                    },
+                )
+                linked_resources = [
+                    resources_by_name[name]
+                    for name in service_spec["resource_names"]
+                ]
+                service.resources.set(linked_resources)
+
+            self.stdout.write(
+                f"  catalog @ {location.name}: "
+                f"{len(demo['resources'])} resources, {len(demo['services'])} services"
+            )

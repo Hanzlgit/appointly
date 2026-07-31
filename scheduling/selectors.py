@@ -306,6 +306,27 @@ def scheduling_booking_settings_to_dict(*, settings) -> dict:
     }
 
 
+def scheduling_location_has_unfinished_references(*, tenant: Tenant, location_id: int) -> bool:
+    """检查地点是否存在未完成的排班或预约引用。
+
+    Args:
+        tenant (Tenant): 目标租户。
+        location_id (int): 地点 ID。
+
+    Returns:
+        bool: 存在排班规则、固定时段或有效预约时返回 ``True``。
+    """
+    if ScheduleRule.objects.filter(tenant=tenant, location_id=location_id).exists():
+        return True
+    if TimeSlot.objects.filter(tenant=tenant, location_id=location_id).exists():
+        return True
+    return Booking.objects.filter(
+        tenant=tenant,
+        status__in=ACTIVE_BOOKING_STATUSES,
+        time_slot__location_id=location_id,
+    ).exists()
+
+
 def scheduling_phone_mask(*, phone: str) -> str:
     """对手机号中间四位脱敏。
 
@@ -321,29 +342,13 @@ def scheduling_phone_mask(*, phone: str) -> str:
     return f"{normalized[:3]}****{normalized[-4:]}"
 
 
-def scheduling_staff_resource_ids_for_user(*, tenant: Tenant, user: User) -> set[int]:
-    """返回工作人员关联的资源 ID 集合。
-
-    Resource 模型已移除 ``staff_user`` 绑定；工作人员端资源过滤暂不可用。
-
-    Args:
-        tenant (Tenant): 目标租户。
-        user (User): 工作人员用户。
-
-    Returns:
-        set[int]: 关联资源 ID 集合（当前恒为空）。
-    """
-    del tenant, user
-    return set()
-
-
 def scheduling_booking_list_for_staff(
     *,
     tenant: Tenant,
     user: User,
     role: str,
 ) -> list[Booking]:
-    """列出后台可见预约；管理员看全部，工作人员仅关联资源。
+    """列出后台可见预约；租户成员均可查看本租户全部预约。
 
     Args:
         tenant (Tenant): 目标租户。
@@ -353,6 +358,7 @@ def scheduling_booking_list_for_staff(
     Returns:
         list[Booking]: 预约列表，按创建时间倒序。
     """
+    del user, role
     queryset = Booking.objects.filter(tenant=tenant).select_related(
         "time_slot",
         "service",
@@ -360,9 +366,6 @@ def scheduling_booking_list_for_staff(
         "time_slot__location",
         "customer__user__customer_profile",
     )
-    if role == TenantRole.STAFF:
-        resource_ids = scheduling_staff_resource_ids_for_user(tenant=tenant, user=user)
-        queryset = queryset.filter(time_slot__resource_id__in=resource_ids)
     return list(queryset.order_by("-created_at"))
 
 

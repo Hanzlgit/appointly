@@ -5,10 +5,9 @@ from __future__ import annotations
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from tenants.models import Tenant, TenantCustomer, TenantRole
+from tenants.models import Tenant, TenantCustomer
 
 from scheduling.models import Booking, TimeSlot
-from scheduling.selectors import scheduling_staff_resource_ids_for_user
 from scheduling.services.audit import scheduling_audit_record
 from scheduling.services.booking_create import (
     _scheduling_booking_validate_capacity,
@@ -69,35 +68,6 @@ def _scheduling_staff_booking_resolve_customer(
     return customer
 
 
-def _scheduling_staff_booking_ensure_resource_access(
-    *,
-    tenant: Tenant,
-    operator: User,
-    role: str,
-    time_slot: TimeSlot,
-) -> None:
-    """校验操作人对时段资源有代建权限。
-
-    Args:
-        tenant (Tenant): 目标租户。
-        operator (User): 操作人。
-        role (str): 操作人在租户下的角色。
-        time_slot (TimeSlot): 目标固定时段。
-
-    Raises:
-        ValidationError: 工作人员无权操作该资源。
-    """
-    if role in {TenantRole.TENANT_ADMIN, "platform_admin"}:
-        return
-
-    allowed_resource_ids = scheduling_staff_resource_ids_for_user(
-        tenant=tenant,
-        user=operator,
-    )
-    if time_slot.resource_id not in allowed_resource_ids:
-        raise ValidationError("无权为该资源代建预约。")
-
-
 def scheduling_booking_staff_create(
     *,
     tenant: Tenant,
@@ -113,7 +83,7 @@ def scheduling_booking_staff_create(
 ) -> Booking:
     """后台代建预约，跳过联系人 OTP 但写入审计。
 
-    遵守容量、时间窗口与重复预约规则；工作人员仅限关联资源。
+    遵守容量、时间窗口与重复预约规则。
 
     Args:
         tenant (Tenant): 目标租户。
@@ -133,6 +103,7 @@ def scheduling_booking_staff_create(
     Raises:
         ValidationError: 参数无效、权限不足或业务规则不满足。
     """
+    del role
     customer = _scheduling_staff_booking_resolve_customer(
         tenant=tenant,
         customer_id=customer_id,
@@ -149,16 +120,9 @@ def scheduling_booking_staff_create(
         return existing
 
     with transaction.atomic():
-        time_slot = (
-            TimeSlot.objects.select_for_update()
-            .select_related("resource", "location")
-            .get(tenant=tenant, id=time_slot_id)
-        )
-        _scheduling_staff_booking_ensure_resource_access(
+        TimeSlot.objects.select_for_update().select_related("resource", "location").get(
             tenant=tenant,
-            operator=operator,
-            role=role,
-            time_slot=time_slot,
+            id=time_slot_id,
         )
 
         booking = scheduling_booking_create(
@@ -216,6 +180,7 @@ def scheduling_staff_booking_validate_create(
     Raises:
         ValidationError: 校验失败。
     """
+    del operator, role
     from catalog.models import Service
 
     try:
@@ -228,12 +193,6 @@ def scheduling_staff_booking_validate_create(
         raise ValidationError("服务项目不存在或未启用。") from exc
 
     time_slot = TimeSlot.objects.select_related("resource").get(tenant=tenant, id=time_slot_id)
-    _scheduling_staff_booking_ensure_resource_access(
-        tenant=tenant,
-        operator=operator,
-        role=role,
-        time_slot=time_slot,
-    )
     _scheduling_booking_validate_time_slot(
         time_slot=time_slot,
         service=service,

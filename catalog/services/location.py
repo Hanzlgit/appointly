@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from scheduling.selectors import scheduling_location_has_unfinished_references
 from tenants.models import Tenant
 
 from catalog.models import Location
@@ -85,4 +86,6 @@ def catalog_location_delete(*, tenant: Tenant, location: Location) -> None:
         raise ValidationError("地点不属于当前租户。")
     if location.business_references.exists():
         raise ValidationError("该地点已被业务引用，只能停用。")
+    if scheduling_location_has_unfinished_references(tenant=tenant, location_id=location.id):
+        raise ValidationError("该地点存在排班或未完成预约，只能停用。")
     location.delete()
