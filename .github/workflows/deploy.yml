@@ -22,7 +22,11 @@ permissions:
   packages: write
 
 jobs:
+  check:
+    uses: ./.github/workflows/reusable-check.yml
+
   build:
+    needs: check
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.meta.outputs.tag }}
