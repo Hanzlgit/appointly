@@ -424,6 +424,158 @@ class ScheduleRuleEffectiveDateTests(SchedulingAdminMixin, APITestCase):
         )
 
 
+class ScheduleRuleUpdateTests(SchedulingAdminMixin, APITestCase):
+    def test_update_slot_interval_regenerates_split_timeslots(self):
+        """验证更新时段间隔后从生效日按新间隔重新生成时段。"""
+        rule_data = self._create_rule(
+            days_of_week=[0],
+            start_time="09:00",
+            end_time="12:00",
+            slot_interval_minutes=30,
+        )
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        effective_date = date(2026, 9, 7)
+        while effective_date.weekday() != 0:
+            effective_date += timedelta(days=1)
+
+        response = self.client.patch(
+            f"/api/v1/acme/scheduling/rules/{rule.id}/",
+            {
+                "effective_date": effective_date.isoformat(),
+                "slot_interval_minutes": 15,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(api_data(response)["slot_interval_minutes"], 15)
+        slots = TimeSlot.objects.filter(
+            schedule_rule=rule,
+            start__date=effective_date,
+            status=TimeSlotStatus.OPEN,
+        )
+        self.assertEqual(slots.count(), 12)
+
+    def test_update_rejects_window_not_divisible_by_interval(self):
+        """验证更新时营业窗口无法被间隔整除则拒绝。"""
+        rule_data = self._create_rule(
+            start_time="09:00",
+            end_time="10:00",
+            slot_interval_minutes=30,
+        )
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        response = self.client.patch(
+            f"/api/v1/acme/scheduling/rules/{rule.id}/",
+            {
+                "effective_date": date(2026, 9, 1).isoformat(),
+                "end_time": "09:50",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("整除", api_message(response))
+
+    def test_deactivate_closes_future_idle_slots_and_stops_generation(self):
+        """验证停用规则后关闭未来空闲时段且不再生成新槽。"""
+        rule_data = self._create_rule(days_of_week=[0, 1, 2, 3, 4, 5, 6])
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        tenant_tz = ZoneInfo("Asia/Shanghai")
+        today_local = timezone.now().astimezone(tenant_tz).date()
+        future_slot_start = datetime.combine(today_local, time(9, 0), tzinfo=tenant_tz).astimezone(
+            UTC
+        )
+        future_slot_end = datetime.combine(today_local, time(10, 0), tzinfo=tenant_tz).astimezone(
+            UTC
+        )
+        future_slot = TimeSlot.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            resource=self.resource,
+            schedule_rule=rule,
+            start=future_slot_start,
+            end=future_slot_end,
+            capacity=1,
+            status=TimeSlotStatus.OPEN,
+        )
+        open_count_before = TimeSlot.objects.filter(
+            schedule_rule=rule,
+            status=TimeSlotStatus.OPEN,
+            start__gte=future_slot_start,
+        ).count()
+
+        response = self.client.patch(
+            f"/api/v1/acme/scheduling/rules/{rule.id}/",
+            {
+                "effective_date": today_local.isoformat(),
+                "is_active": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(api_data(response)["is_active"])
+        future_slot.refresh_from_db()
+        self.assertEqual(future_slot.status, TimeSlotStatus.CLOSED)
+        self.assertEqual(
+            TimeSlot.objects.filter(
+                schedule_rule=rule,
+                status=TimeSlotStatus.OPEN,
+                start__gte=future_slot_start,
+            ).count(),
+            0,
+        )
+        self.assertGreater(open_count_before, 0)
+
+        created = scheduling_timeslots_generate_for_rule(
+            tenant=self.tenant,
+            rule=ScheduleRule.objects.get(id=rule.id),
+            from_date=today_local,
+        )
+        self.assertEqual(created, 0)
+
+    def test_reactivate_regenerates_slots_from_effective_date(self):
+        """验证重新启用规则后从生效日重新生成时段。"""
+        rule_data = self._create_rule(days_of_week=[0, 1, 2, 3, 4, 5, 6])
+        rule = ScheduleRule.objects.get(id=rule_data["id"])
+
+        tenant_tz = ZoneInfo("Asia/Shanghai")
+        today_local = timezone.now().astimezone(tenant_tz).date()
+
+        deactivate_response = self.client.patch(
+            f"/api/v1/acme/scheduling/rules/{rule.id}/",
+            {
+                "effective_date": today_local.isoformat(),
+                "is_active": False,
+            },
+            format="json",
+        )
+        self.assertEqual(deactivate_response.status_code, 200)
+
+        activate_response = self.client.patch(
+            f"/api/v1/acme/scheduling/rules/{rule.id}/",
+            {
+                "effective_date": today_local.isoformat(),
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(activate_response.status_code, 200)
+        self.assertTrue(api_data(activate_response)["is_active"])
+        self.assertGreater(
+            TimeSlot.objects.filter(
+                schedule_rule=rule,
+                status=TimeSlotStatus.OPEN,
+                start__date__gte=today_local,
+            ).count(),
+            0,
+        )
+
+
 class SchedulingCeleryTaskTests(SchedulingAdminMixin, APITestCase):
     def test_celery_task_generates_timeslots_for_active_rules(self):
         """验证 Celery 任务可为活跃规则批量生成时段且幂等。"""

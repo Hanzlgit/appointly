@@ -200,12 +200,25 @@ def scheduling_timeslots_generate_for_rule(
                     start_time=slot_start_time,
                     end_time=slot_end_time,
                 )
-                exists = TimeSlot.objects.filter(
+                existing_slot = TimeSlot.objects.filter(
                     resource=rule.resource,
                     start=slot_start,
                     end=slot_end,
-                ).exists()
-                if not exists and not scheduling_resource_has_overlap(
+                ).first()
+                if existing_slot is not None:
+                    if existing_slot.status != TimeSlotStatus.OPEN:
+                        from scheduling.services.booking import scheduling_booking_has_active_on_slot
+
+                        if (
+                            existing_slot.schedule_rule_id == rule.id
+                            and not scheduling_booking_has_active_on_slot(time_slot=existing_slot)
+                        ):
+                            existing_slot.status = TimeSlotStatus.OPEN
+                            existing_slot.capacity = rule.capacity
+                            existing_slot.save(update_fields=["status", "capacity", "updated_at"])
+                            created_count += 1
+                    continue
+                if not scheduling_resource_has_overlap(
                     resource=rule.resource,
                     start=slot_start,
                     end=slot_end,
