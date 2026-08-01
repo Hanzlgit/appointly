@@ -11,7 +11,7 @@ from rest_framework.test import APIClient, APITestCase
 from scheduling.models import Booking, BookingStatus, TimeSlot, TimeSlotStatus
 from tenants.models import Tenant, TenantCustomer
 
-from tests.support import api_code, api_data, api_message
+from tests.support import api_code, api_data, api_message, booking_create_for_test
 
 
 @override_settings(
@@ -253,16 +253,49 @@ class BookingCreateTests(APITestCase):
 
     def test_customer_can_list_own_bookings_in_tenant(self):
         """客户可查看自己在当前租户下的预约列表。"""
-        create = self._create_booking(idempotency_key=str(uuid4()))
-        self.assertEqual(create.status_code, 201)
-        booking_id = api_data(create)["id"]
+        customer = TenantCustomer.objects.get(user=self.customer_user, tenant=self.tenant)
+        booking = booking_create_for_test(
+            tenant=self.tenant,
+            time_slot=self.time_slot,
+            service=self.service,
+            customer=customer,
+            idempotency_key=str(uuid4()),
+        )
 
         response = self.client.get("/api/v1/acme/scheduling/bookings/")
 
         self.assertEqual(response.status_code, 200)
         bookings = api_data(response)["bookings"]
         self.assertEqual(len(bookings), 1)
-        self.assertEqual(bookings[0]["id"], booking_id)
+        self.assertEqual(bookings[0]["id"], booking.id)
+        self.assertEqual(bookings[0]["service_name"], self.service.name)
+        self.assertEqual(bookings[0]["location_name"], self.location.name)
+        self.assertEqual(bookings[0]["resource_name"], self.resource.name)
+        self.assertTrue(bookings[0]["location_is_active"])
+        self.assertTrue(bookings[0]["resource_is_active"])
+
+    def test_customer_booking_list_includes_inactive_place_labels(self):
+        """列表返回门店/资源名称及停用状态，供客户端展示历史预约。"""
+        customer = TenantCustomer.objects.get(user=self.customer_user, tenant=self.tenant)
+        booking_create_for_test(
+            tenant=self.tenant,
+            time_slot=self.time_slot,
+            service=self.service,
+            customer=customer,
+            idempotency_key=str(uuid4()),
+        )
+        self.location.is_active = False
+        self.location.save(update_fields=["is_active"])
+        self.resource.is_active = False
+        self.resource.save(update_fields=["is_active"])
+
+        response = self.client.get("/api/v1/acme/scheduling/bookings/")
+        booking = api_data(response)["bookings"][0]
+
+        self.assertEqual(booking["location_name"], self.location.name)
+        self.assertFalse(booking["location_is_active"])
+        self.assertEqual(booking["resource_name"], self.resource.name)
+        self.assertFalse(booking["resource_is_active"])
 
 
 class BookingCreateConcurrencyTests(TransactionTestCase):

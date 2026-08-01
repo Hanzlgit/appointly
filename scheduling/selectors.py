@@ -430,14 +430,23 @@ def scheduling_booking_to_dict(
         dict: 含预约字段的响应字典。
     """
     time_slot = booking.time_slot
+    location = time_slot.location
+    resource = time_slot.resource
+    service = booking.service
     payload = {
         "id": booking.id,
         "status": booking.status,
         "party_size": booking.party_size,
         "contact_name": booking.contact_name,
         "service_id": booking.service_id,
+        "service_name": service.name,
         "resource_id": time_slot.resource_id,
+        "resource_name": resource.name,
+        "resource_is_active": resource.is_active,
         "location_id": time_slot.location_id,
+        "location_name": location.name,
+        "location_address": location.address,
+        "location_is_active": location.is_active,
         "time_slot_id": time_slot.id,
         "start": scheduling_datetime_to_tenant_iso(tenant=tenant, dt=time_slot.start),
         "end": scheduling_datetime_to_tenant_iso(tenant=tenant, dt=time_slot.end),
