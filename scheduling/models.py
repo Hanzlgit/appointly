@@ -189,7 +189,6 @@ class Booking(models.Model):
         related_name="bookings",
     )
     status = models.CharField(max_length=16, choices=BookingStatus.choices)
-    party_size = models.PositiveIntegerField(default=1)
     contact_name = models.CharField(max_length=128, blank=True, default="")
     contact_phone = models.CharField(max_length=32, blank=True, default="")
     idempotency_key = models.CharField(max_length=128)

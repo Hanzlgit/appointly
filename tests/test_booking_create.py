@@ -1,12 +1,12 @@
-from datetime import UTC, datetime
+from datetime import timedelta
 from threading import Barrier, Thread
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 from catalog.models import Location, Resource, Service
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import TransactionTestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 from scheduling.models import Booking, BookingStatus, TimeSlot, TimeSlotStatus
 from tenants.models import Tenant, TenantCustomer
@@ -55,9 +55,8 @@ class BookingCreateTests(APITestCase):
         )
         self.service.resources.add(self.resource)
 
-        tenant_tz = ZoneInfo("Asia/Shanghai")
-        slot_start = datetime(2026, 8, 1, 9, 0, tzinfo=tenant_tz).astimezone(UTC)
-        slot_end = datetime(2026, 8, 1, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
+        slot_start = timezone.now() + timedelta(days=2)
+        slot_end = slot_start + timedelta(hours=1)
         self.time_slot = TimeSlot.objects.create(
             tenant=self.tenant,
             location=self.location,
@@ -90,8 +89,8 @@ class BookingCreateTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
         self.customer_user = User.objects.get(customer_profile__phone=self.phone)
 
-    def _seed_booking_on_slot(self, *, party_size: int, idempotency_key: str) -> None:
-        """在默认时段上创建占用容量的预约（使用另一客户）。"""
+    def _seed_booking_on_slot(self, *, idempotency_key: str) -> None:
+        """在默认时段上创建占用名额的预约（使用另一客户）。"""
         other_phone = "13900139001"
         self.client.post(
             "/api/v1/auth/customer/verification-codes/",
@@ -116,7 +115,6 @@ class BookingCreateTests(APITestCase):
             time_slot=self.time_slot,
             service=self.service,
             status=BookingStatus.CONFIRMED,
-            party_size=party_size,
             idempotency_key=idempotency_key,
         )
 
@@ -133,7 +131,6 @@ class BookingCreateTests(APITestCase):
         body = {
             "time_slot_id": self.time_slot.id,
             "service_id": self.service.id,
-            "party_size": 1,
         }
         body.update(payload)
         if body.get("time_slot_id") is None:
@@ -149,34 +146,35 @@ class BookingCreateTests(APITestCase):
         )
 
     def test_customer_creates_booking_with_confirmed_status(self):
-        """客户指定时段、服务、人数创建预约并自动确认。"""
+        """客户指定时段、服务创建预约并自动确认。"""
         response = self._create_booking(idempotency_key=str(uuid4()))
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(api_code(response), 0)
         data = api_data(response)
         self.assertEqual(data["status"], BookingStatus.CONFIRMED)
-        self.assertEqual(data["party_size"], 1)
         self.assertEqual(data["service_id"], self.service.id)
         self.assertEqual(data["resource_id"], self.resource.id)
         self.assertEqual(data["time_slot_id"], self.time_slot.id)
         self.assertEqual(Booking.objects.count(), 1)
 
     def test_insufficient_capacity_returns_error_without_booking(self):
-        """容量不足时返回明确错误且不产生预约记录。"""
-        self._seed_booking_on_slot(party_size=2, idempotency_key="seed-booking")
+        """剩余名额不足时返回明确错误且不产生预约记录。"""
+        self.time_slot.capacity = 1
+        self.time_slot.save(update_fields=["capacity"])
+        self._seed_booking_on_slot(idempotency_key="seed-booking")
 
-        response = self._create_booking(idempotency_key=str(uuid4()), party_size=2)
+        response = self._create_booking(idempotency_key=str(uuid4()))
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("容量不足", api_message(response))
+        self.assertIn("剩余名额不足", api_message(response))
         self.assertEqual(Booking.objects.count(), 1)
 
     def test_idempotent_retry_returns_first_booking_without_double_capacity(self):
-        """相同 Idempotency-Key 重试返回首次结果且不重复占用容量。"""
+        """相同 Idempotency-Key 重试返回首次结果且不重复占用名额。"""
         idempotency_key = str(uuid4())
-        first = self._create_booking(idempotency_key=idempotency_key, party_size=2)
-        second = self._create_booking(idempotency_key=idempotency_key, party_size=2)
+        first = self._create_booking(idempotency_key=idempotency_key)
+        second = self._create_booking(idempotency_key=idempotency_key)
 
         self.assertEqual(first.status_code, 201)
         self.assertEqual(second.status_code, 201)
@@ -230,15 +228,17 @@ class BookingCreateTests(APITestCase):
             status=TimeSlotStatus.OPEN,
         )
         customer = TenantCustomer.objects.get(user=self.customer_user, tenant=self.tenant)
-        Booking.objects.create(
-            tenant=self.tenant,
-            customer=customer,
-            time_slot=heavy_slot,
-            service=self.service,
-            status=BookingStatus.CONFIRMED,
-            party_size=3,
-            idempotency_key="heavy-load",
-        )
+        for index in range(3):
+            other_user = User.objects.create_user(username=f"heavy-load-{index}")
+            other_customer = TenantCustomer.objects.create(tenant=self.tenant, user=other_user)
+            Booking.objects.create(
+                tenant=self.tenant,
+                customer=other_customer,
+                time_slot=heavy_slot,
+                service=self.service,
+                status=BookingStatus.CONFIRMED,
+                idempotency_key=f"heavy-load-{index}",
+            )
 
         response = self._create_booking(
             idempotency_key=str(uuid4()),
@@ -307,6 +307,7 @@ class BookingCreateConcurrencyTests(TransactionTestCase):
         """准备单容量时段与两名客户 JWT。"""
         cache.clear()
         from django.test import override_settings
+        from django.utils import timezone
 
         self._settings = override_settings(
             CACHES={
@@ -333,9 +334,8 @@ class BookingCreateConcurrencyTests(TransactionTestCase):
             duration_minutes=60,
         )
         self.service.resources.add(self.resource)
-        tenant_tz = ZoneInfo("Asia/Shanghai")
-        slot_start = datetime(2026, 8, 1, 9, 0, tzinfo=tenant_tz).astimezone(UTC)
-        slot_end = datetime(2026, 8, 1, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
+        slot_start = timezone.now() + timedelta(days=2)
+        slot_end = slot_start + timedelta(hours=1)
         self.time_slot = TimeSlot.objects.create(
             tenant=self.tenant,
             location=self.location,
@@ -380,7 +380,6 @@ class BookingCreateConcurrencyTests(TransactionTestCase):
                 {
                     "time_slot_id": self.time_slot.id,
                     "service_id": self.service.id,
-                    "party_size": 1,
                 },
                 format="json",
                 HTTP_AUTHORIZATION=f"Bearer {token}",

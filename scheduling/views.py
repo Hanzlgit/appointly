@@ -41,7 +41,6 @@ from scheduling.serializers import (
     BookingContactUpdateRequestSerializer,
     BookingCreateRequestSerializer,
     BookingListResponseSerializer,
-    BookingPartySizeUpdateRequestSerializer,
     BookingRescheduleRequestSerializer,
     BookingResponseSerializer,
     ScheduleRuleCreateRequestSerializer,
@@ -62,7 +61,10 @@ from scheduling.serializers import (
     TimeSlotResponseSerializer,
 )
 from scheduling.services.availability_cache import scheduling_availability_query_cached
-from scheduling.services.booking_create import scheduling_booking_create
+from scheduling.services.booking_create import (
+    scheduling_booking_create,
+    scheduling_customer_booking_contact_defaults,
+)
 from scheduling.services.booking_settings import (
     scheduling_booking_settings_get_for_tenant,
     scheduling_booking_settings_update,
@@ -75,7 +77,6 @@ from scheduling.services.booking_transition import (
     scheduling_booking_contact_update,
     scheduling_booking_get_for_tenant,
     scheduling_booking_no_show,
-    scheduling_booking_party_size_update,
     scheduling_booking_reject,
     scheduling_booking_reschedule,
 )
@@ -604,6 +605,9 @@ class BookingListCreateView(TenantContextMixin, APIView):
         request_serializer = BookingCreateRequestSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
+        contact_name, contact_phone = scheduling_customer_booking_contact_defaults(
+            customer=customer,
+        )
 
         try:
             booking = scheduling_booking_create(
@@ -611,14 +615,13 @@ class BookingListCreateView(TenantContextMixin, APIView):
                 customer=customer,
                 idempotency_key=idempotency_key,
                 service_id=validated_data["service_id"],
-                party_size=validated_data.get("party_size", 1),
                 time_slot_id=validated_data.get("time_slot_id"),
                 location_id=validated_data.get("location_id"),
                 start=validated_data.get("start"),
                 end=validated_data.get("end"),
                 resource_id=validated_data.get("resource_id"),
-                contact_name=validated_data.get("contact_name", ""),
-                contact_phone=validated_data.get("contact_phone", ""),
+                contact_name=contact_name,
+                contact_phone=contact_phone,
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
@@ -874,49 +877,6 @@ class BookingRescheduleView(TenantContextMixin, APIView):
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
 
-class BookingPartySizeUpdateView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantCustomer]
-
-    @extend_schema(
-        summary="客户修改预约人数",
-        request=BookingPartySizeUpdateRequestSerializer,
-        responses={200: enveloped_response_serializer(BookingResponseSerializer)},
-    )
-    def patch(self, request, *args, **kwargs):
-        """客户修改预约人数。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: 含更新后预约的标准 envelope 响应。
-        """
-        tenant = self.get_tenant()
-        customer = tenant_customer_get_for_user(tenant=tenant, user=request.user)
-        booking = _scheduling_customer_booking_get(
-            tenant=tenant,
-            customer=customer,
-            booking_id=self.kwargs["booking_id"],
-        )
-
-        request_serializer = BookingPartySizeUpdateRequestSerializer(data=request.data)
-        request_serializer.is_valid(raise_exception=True)
-        validated_data = request_serializer.validated_data
-
-        try:
-            booking = scheduling_booking_party_size_update(
-                booking=booking,
-                party_size=validated_data["party_size"],
-            )
-        except DjangoValidationError as exc:
-            _raise_drf_validation_error(exc)
-
-        response_serializer = BookingResponseSerializer(
-            scheduling_booking_to_dict(tenant=tenant, booking=booking)
-        )
-        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
-
-
 class BookingContactUpdateView(TenantContextMixin, APIView):
     permission_classes = [RequiresTenantCustomer]
 
@@ -1043,7 +1003,6 @@ class StaffBookingListCreateView(TenantContextMixin, APIView):
                 role=role,
                 idempotency_key=idempotency_key,
                 service_id=validated_data["service_id"],
-                party_size=validated_data.get("party_size", 1),
                 time_slot_id=validated_data["time_slot_id"],
                 customer_id=validated_data.get("customer_id"),
                 contact_name=validated_data.get("contact_name", ""),

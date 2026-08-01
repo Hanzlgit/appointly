@@ -75,7 +75,6 @@ def scheduling_booking_staff_create(
     role: str,
     idempotency_key: str,
     service_id: int,
-    party_size: int,
     time_slot_id: int,
     customer_id: int | None = None,
     contact_name: str = "",
@@ -91,7 +90,6 @@ def scheduling_booking_staff_create(
         role (str): 操作人在租户下的角色。
         idempotency_key (str): 请求幂等键。
         service_id (int): 服务项目 ID。
-        party_size (int): 预约人数。
         time_slot_id (int): 固定时段 ID。
         customer_id (int | None): 现有客户档案 ID。
         contact_name (str): 临时联系人姓名。
@@ -119,6 +117,14 @@ def scheduling_booking_staff_create(
     if existing is not None:
         return existing
 
+    resolved_name = contact_name.strip()
+    resolved_phone = contact_phone.strip()
+    if customer_id is not None:
+        if not resolved_name:
+            resolved_name = customer.display_name.strip()
+        if not resolved_phone and hasattr(customer.user, "customer_profile"):
+            resolved_phone = customer.user.customer_profile.phone
+
     with transaction.atomic():
         TimeSlot.objects.select_for_update().select_related("resource", "location").get(
             tenant=tenant,
@@ -130,15 +136,10 @@ def scheduling_booking_staff_create(
             customer=customer,
             idempotency_key=idempotency_key,
             service_id=service_id,
-            party_size=party_size,
             time_slot_id=time_slot_id,
-            contact_name=contact_name,
-            contact_phone=contact_phone,
+            contact_name=resolved_name,
+            contact_phone=resolved_phone,
         )
-
-        resolved_phone = contact_phone.strip()
-        if not resolved_phone and hasattr(customer.user, "customer_profile"):
-            resolved_phone = customer.user.customer_profile.phone
 
         scheduling_audit_record(
             tenant_id=tenant.id,
@@ -162,7 +163,6 @@ def scheduling_staff_booking_validate_create(
     operator: User,
     role: str,
     service_id: int,
-    party_size: int,
     time_slot_id: int,
 ) -> None:
     """预校验代建是否满足容量与规则（不写入）。
@@ -174,7 +174,6 @@ def scheduling_staff_booking_validate_create(
         operator (User): 操作人。
         role (str): 操作人在租户下的角色。
         service_id (int): 服务项目 ID。
-        party_size (int): 预约人数。
         time_slot_id (int): 固定时段 ID。
 
     Raises:
@@ -198,4 +197,4 @@ def scheduling_staff_booking_validate_create(
         service=service,
         resource_id=None,
     )
-    _scheduling_booking_validate_capacity(time_slot=time_slot, party_size=party_size)
+    _scheduling_booking_validate_capacity(time_slot=time_slot)

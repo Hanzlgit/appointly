@@ -139,7 +139,6 @@ class StaffBookingTests(APITestCase):
         body = {
             "time_slot_id": self.time_slot.id,
             "service_id": self.service.id,
-            "party_size": 1,
         }
         body.update(payload)
         headers = {}
@@ -270,13 +269,14 @@ class StaffBookingTests(APITestCase):
         self.assertEqual(len(staff_bookings), 2)
 
     def test_over_capacity_staff_create_rejected(self):
-        """超容量代建被拒绝。"""
+        """剩余名额不足时代建被拒绝。"""
+        self.time_slot.capacity = 1
+        self.time_slot.save(update_fields=["capacity"])
         self._as_admin()
         booking_create_for_test(
             tenant=self.tenant,
             time_slot=self.time_slot,
             service=self.service,
-            party_size=2,
             idempotency_key="fill-slot",
         )
         now = self.slot_start - timedelta(days=1)
@@ -284,31 +284,31 @@ class StaffBookingTests(APITestCase):
             response = self._staff_create_booking(
                 idempotency_key=str(uuid4()),
                 customer_id=self.existing_customer.id,
-                party_size=1,
             )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("容量不足", api_message(response))
+        self.assertIn("剩余名额不足", api_message(response))
         self.assertEqual(Booking.objects.count(), 1)
 
     def test_admin_adjusts_capacity_then_creates_booking(self):
         """管理员调整容量并填写原因后可代建。"""
+        self.time_slot.capacity = 1
+        self.time_slot.save(update_fields=["capacity"])
         self._as_admin()
         booking_create_for_test(
             tenant=self.tenant,
             time_slot=self.time_slot,
             service=self.service,
-            party_size=2,
             idempotency_key="fill-slot",
         )
 
         adjust = self.client.post(
             f"/api/v1/acme/scheduling/time-slots/{self.time_slot.id}/capacity-adjust/",
-            {"capacity": 3, "reason": "临时加开"},
+            {"capacity": 2, "reason": "临时加开"},
             format="json",
         )
         self.assertEqual(adjust.status_code, 200)
-        self.assertEqual(api_data(adjust)["capacity"], 3)
+        self.assertEqual(api_data(adjust)["capacity"], 2)
 
         capacity_entries = [
             entry

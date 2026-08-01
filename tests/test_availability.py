@@ -86,7 +86,6 @@ class AvailabilityQueryTests(APITestCase):
             tenant=self.tenant,
             time_slot=self.time_slot,
             service=self.service,
-            party_size=1,
             idempotency_key="avail-seed-1",
         )
 
@@ -158,12 +157,11 @@ class AvailabilityQueryTests(APITestCase):
             tenant=self.tenant,
             time_slot=self.time_slot,
             service=self.service,
-            party_size=2,
             idempotency_key="avail-cache-test",
         )
 
         second = self._query_availability(resource_id=self.resource.id)
-        self.assertEqual(api_data(second)["slots"][0]["remaining_capacity"], 1)
+        self.assertEqual(api_data(second)["slots"][0]["remaining_capacity"], 2)
 
     def test_inactive_resource_excluded_from_availability(self):
         """停用资源后其时段不再参与可用性查询。"""

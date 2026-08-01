@@ -7,7 +7,6 @@ from datetime import timedelta
 from catalog.models import Service
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 from tenants.models import Tenant, TenantCustomer
 
@@ -22,13 +21,28 @@ from scheduling.services.booking import ACTIVE_BOOKING_STATUSES
 from scheduling.services.booking_settings import scheduling_booking_settings_get_for_tenant
 
 
+def scheduling_customer_booking_contact_defaults(*, customer: TenantCustomer) -> tuple[str, str]:
+    """从客户档案解析预约联系人信息。
+
+    Args:
+        customer (TenantCustomer): 下单客户档案。
+
+    Returns:
+        tuple[str, str]: ``(contact_name, contact_phone)``。
+    """
+    contact_name = customer.display_name.strip()
+    contact_phone = ""
+    if hasattr(customer.user, "customer_profile"):
+        contact_phone = customer.user.customer_profile.phone
+    return contact_name, contact_phone
+
+
 def scheduling_booking_create(
     *,
     tenant: Tenant,
     customer: TenantCustomer,
     idempotency_key: str,
     service_id: int,
-    party_size: int,
     time_slot_id: int | None = None,
     location_id: int | None = None,
     start=None,
@@ -47,14 +61,13 @@ def scheduling_booking_create(
         customer (TenantCustomer): 下单客户档案。
         idempotency_key (str): 请求幂等键。
         service_id (int): 服务项目 ID。
-        party_size (int): 预约人数。
         time_slot_id (int | None): 指定固定时段 ID。
         location_id (int | None): 未指定时段时用于匹配地点。
         start: 未指定时段时的开始时间（UTC）。
         end: 未指定时段时的结束时间（UTC）。
         resource_id (int | None): 可选指定资源；省略时自动分配。
-        contact_name (str): 代他人预约时的联系人姓名。
-        contact_phone (str): 代他人预约时的联系人手机号。
+        contact_name (str): 联系人姓名。
+        contact_phone (str): 联系人手机号。
 
     Returns:
         Booking: 新建或幂等重放的预约。
@@ -109,10 +122,7 @@ def scheduling_booking_create(
             customer=customer,
             time_slot=time_slot,
         )
-        _scheduling_booking_validate_capacity(
-            time_slot=time_slot,
-            party_size=party_size,
-        )
+        _scheduling_booking_validate_capacity(time_slot=time_slot)
 
         settings = scheduling_booking_settings_get_for_tenant(tenant=tenant)
         _scheduling_booking_validate_booking_rules(
@@ -135,7 +145,6 @@ def scheduling_booking_create(
             time_slot=time_slot,
             service=service,
             status=status,
-            party_size=party_size,
             contact_name=contact_name.strip(),
             contact_phone=contact_phone.strip(),
             idempotency_key=idempotency_key,
@@ -200,7 +209,7 @@ def _scheduling_booking_resolve_time_slot(
         if _scheduling_booking_remaining_capacity(time_slot=slot) > 0
     ]
     if not available_slots:
-        raise ValidationError("该时段容量不足或不可用。")
+        raise ValidationError("该时段剩余名额不足或不可用。")
 
     if resource_id is not None:
         return available_slots[0]
@@ -231,40 +240,33 @@ def _scheduling_booking_pick_lowest_load_slot(*, slots: list[TimeSlot]) -> TimeS
 
 
 def _scheduling_booking_resource_active_load(*, resource_id: int) -> int:
-    """统计资源当前有效预约总数（按 party_size 计）。
+    """统计资源当前有效预约条数。
 
     Args:
         resource_id (int): 资源 ID。
 
     Returns:
-        int: 有效预约人数合计。
+        int: 有效预约数量。
     """
-    total = (
-        Booking.objects.filter(
-            time_slot__resource_id=resource_id,
-            status__in=ACTIVE_BOOKING_STATUSES,
-        ).aggregate(total=Sum("party_size"))["total"]
-        or 0
-    )
-    return total
+    return Booking.objects.filter(
+        time_slot__resource_id=resource_id,
+        status__in=ACTIVE_BOOKING_STATUSES,
+    ).count()
 
 
 def _scheduling_booking_remaining_capacity(*, time_slot: TimeSlot) -> int:
-    """计算时段剩余容量。
+    """计算时段剩余可预约名额。
 
     Args:
         time_slot (TimeSlot): 固定时段。
 
     Returns:
-        int: 剩余可预约人数。
+        int: 剩余名额。
     """
-    used = (
-        Booking.objects.filter(
-            time_slot=time_slot,
-            status__in=ACTIVE_BOOKING_STATUSES,
-        ).aggregate(total=Sum("party_size"))["total"]
-        or 0
-    )
+    used = Booking.objects.filter(
+        time_slot=time_slot,
+        status__in=ACTIVE_BOOKING_STATUSES,
+    ).count()
     return max(0, time_slot.capacity - used)
 
 
@@ -322,22 +324,17 @@ def _scheduling_booking_validate_customer_slot(
         raise ValidationError("您在该时段已有有效预约。")
 
 
-def _scheduling_booking_validate_capacity(
-    *,
-    time_slot: TimeSlot,
-    party_size: int,
-) -> None:
-    """校验时段剩余容量是否足够。
+def _scheduling_booking_validate_capacity(*, time_slot: TimeSlot) -> None:
+    """校验时段是否还有可预约名额。
 
     Args:
         time_slot (TimeSlot): 固定时段。
-        party_size (int): 预约人数。
 
     Raises:
-        ValidationError: 容量不足。
+        ValidationError: 剩余名额不足。
     """
-    if _scheduling_booking_remaining_capacity(time_slot=time_slot) < party_size:
-        raise ValidationError("该时段容量不足。")
+    if _scheduling_booking_remaining_capacity(time_slot=time_slot) < 1:
+        raise ValidationError("该时段剩余名额不足。")
 
 
 def _scheduling_booking_validate_booking_rules(

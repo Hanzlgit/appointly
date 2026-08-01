@@ -1,12 +1,12 @@
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 from catalog.models import Location, Resource, Service
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework.test import APITestCase
 from scheduling.models import Booking, BookingCancelActor, BookingStatus, TimeSlot, TimeSlotStatus
 from tenants.models import Tenant, TenantCustomer
@@ -55,9 +55,8 @@ class BookingLifecycleTests(APITestCase):
         )
         self.service.resources.add(self.resource)
 
-        tenant_tz = ZoneInfo("Asia/Shanghai")
-        self.slot_start = datetime(2026, 8, 1, 9, 0, tzinfo=tenant_tz).astimezone(UTC)
-        self.slot_end = datetime(2026, 8, 1, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
+        self.slot_start = timezone.now() + timedelta(days=2)
+        self.slot_end = self.slot_start + timedelta(hours=1)
         self.time_slot = TimeSlot.objects.create(
             tenant=self.tenant,
             location=self.location,
@@ -112,7 +111,6 @@ class BookingLifecycleTests(APITestCase):
         body = {
             "time_slot_id": self.time_slot.id,
             "service_id": self.service.id,
-            "party_size": 1,
         }
         body.update(payload)
         headers = {}
@@ -202,6 +200,8 @@ class BookingLifecycleTests(APITestCase):
     def test_reschedule_rollback_when_new_slot_unavailable(self):
         """新时段失败时旧预约保持不变。"""
         booking = self._seed_confirmed_booking()
+        self.other_slot.capacity = 1
+        self.other_slot.save(update_fields=["capacity"])
         other_customer = TenantCustomer.objects.create(
             tenant=self.tenant,
             user=User.objects.create_user(username="other-customer"),
@@ -212,7 +212,6 @@ class BookingLifecycleTests(APITestCase):
             time_slot=self.other_slot,
             service=self.service,
             status=BookingStatus.CONFIRMED,
-            party_size=2,
             idempotency_key="fill-other-slot",
         )
 
@@ -228,105 +227,25 @@ class BookingLifecycleTests(APITestCase):
             )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("容量不足", api_message(response))
+        self.assertIn("剩余名额不足", api_message(response))
         booking.refresh_from_db()
         self.assertEqual(booking.status, BookingStatus.CONFIRMED)
         self.assertIsNone(booking.rescheduled_to_id)
         self.assertEqual(Booking.objects.filter(status=BookingStatus.RESCHEDULED).count(), 0)
 
-    def test_customer_can_increase_party_size_when_capacity_allows(self):
-        """增加人数时重新校验容量。"""
-        self.time_slot.capacity = 3
-        self.time_slot.save(update_fields=["capacity"])
-        booking = self._seed_confirmed_booking()
-
-        response = self.client.patch(
-            f"/api/v1/acme/scheduling/bookings/{booking.id}/party-size/",
-            {"party_size": 2},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(api_data(response)["party_size"], 2)
-        booking.refresh_from_db()
-        self.assertEqual(booking.party_size, 2)
-
-    def test_increase_party_size_rejected_when_capacity_insufficient(self):
-        """容量不足时拒绝增加人数。"""
-        booking = self._seed_confirmed_booking()
-
-        response = self.client.patch(
-            f"/api/v1/acme/scheduling/bookings/{booking.id}/party-size/",
-            {"party_size": 2},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("容量不足", api_message(response))
-        booking.refresh_from_db()
-        self.assertEqual(booking.party_size, 1)
-
-    def test_decrease_party_size_releases_capacity_immediately(self):
-        """减少人数后立即释放容量。"""
-        self.time_slot.capacity = 2
-        self.time_slot.save(update_fields=["capacity"])
+    def test_create_booking_uses_customer_profile_contact(self):
+        """创建预约时自动写入登录客户的联系人信息。"""
+        customer = TenantCustomer.objects.get(user=self.customer_user, tenant=self.tenant)
+        customer.display_name = "王五"
+        customer.save(update_fields=["display_name", "updated_at"])
         now = self.slot_start - timedelta(days=1)
         with patch("django.utils.timezone.now", return_value=now):
-            create = self._create_booking(idempotency_key=str(uuid4()), party_size=2)
-        self.assertEqual(create.status_code, 201)
-        booking = Booking.objects.get(id=api_data(create)["id"])
-
-        response = self.client.patch(
-            f"/api/v1/acme/scheduling/bookings/{booking.id}/party-size/",
-            {"party_size": 1},
-            format="json",
-        )
-
-        self.assertEqual(response.status_code, 200)
-        booking.refresh_from_db()
-        self.assertEqual(booking.party_size, 1)
-
-        other_phone = "13900139100"
-        self.client.post(
-            "/api/v1/auth/customer/verification-codes/",
-            {"phone": other_phone},
-            format="json",
-        )
-        from accounts.services.sms import sms_sent_message_list
-
-        code = sms_sent_message_list()[-1]["code"]
-        login = self.client.post(
-            "/api/v1/auth/customer/sessions/",
-            {"phone": other_phone, "code": code, "tenant_slug": "acme"},
-            format="json",
-        )
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {api_data(login)['access']}")
-        retry = self.client.post(
-            "/api/v1/acme/scheduling/bookings/",
-            {
-                "time_slot_id": self.time_slot.id,
-                "service_id": self.service.id,
-                "party_size": 1,
-            },
-            format="json",
-            HTTP_IDEMPOTENCY_KEY=str(uuid4()),
-        )
-        self.assertEqual(retry.status_code, 201)
-
-    def test_create_booking_for_others_with_contact_fields(self):
-        """代他人预约时可填写联系人姓名与手机号。"""
-        now = self.slot_start - timedelta(days=1)
-        with patch("django.utils.timezone.now", return_value=now):
-            response = self._create_booking(
-                idempotency_key=str(uuid4()),
-                contact_name="张三",
-                contact_phone="13800138000",
-            )
+            response = self._create_booking(idempotency_key=str(uuid4()))
 
         self.assertEqual(response.status_code, 201)
         data = api_data(response)
-        self.assertEqual(data["contact_name"], "张三")
-        self.assertEqual(data["contact_phone"], "13800138000")
+        self.assertEqual(data["contact_name"], "王五")
+        self.assertEqual(data["contact_phone"], self.phone)
 
     def test_contact_phone_change_requires_otp(self):
         """修改联系人手机号需 OTP 二次验证。"""
@@ -334,8 +253,6 @@ class BookingLifecycleTests(APITestCase):
         with patch("django.utils.timezone.now", return_value=now):
             create = self._create_booking(
                 idempotency_key=str(uuid4()),
-                contact_name="李四",
-                contact_phone="13800138001",
             )
         booking_id = api_data(create)["id"]
 
@@ -379,8 +296,8 @@ class BookingLifecycleTests(APITestCase):
             booking.status = status
             booking.save(update_fields=["status", "updated_at"])
             response = self.client.patch(
-                f"/api/v1/acme/scheduling/bookings/{booking.id}/party-size/",
-                {"party_size": 1},
+                f"/api/v1/acme/scheduling/bookings/{booking.id}/contact/",
+                {"contact_name": "新名字"},
                 format="json",
             )
             self.assertEqual(response.status_code, 400, msg=status)

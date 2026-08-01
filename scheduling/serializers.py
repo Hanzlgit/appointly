@@ -138,19 +138,15 @@ class AvailabilityAggregateQueryResponseSerializer(serializers.Serializer):
 class BookingCreateRequestSerializer(serializers.Serializer):
     time_slot_id = serializers.IntegerField(required=False)
     service_id = serializers.IntegerField()
-    party_size = serializers.IntegerField(min_value=1, default=1)
     location_id = serializers.IntegerField(required=False)
     start = serializers.DateTimeField(required=False)
     end = serializers.DateTimeField(required=False)
     resource_id = serializers.IntegerField(required=False)
-    contact_name = serializers.CharField(required=False, allow_blank=True, default="")
-    contact_phone = serializers.CharField(required=False, allow_blank=True, default="")
 
 
 class BookingResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     status = serializers.CharField()
-    party_size = serializers.IntegerField()
     contact_name = serializers.CharField()
     contact_phone = serializers.CharField()
     service_id = serializers.IntegerField()
@@ -179,10 +175,6 @@ class BookingRescheduleRequestSerializer(serializers.Serializer):
     idempotency_key = serializers.CharField(max_length=128)
 
 
-class BookingPartySizeUpdateRequestSerializer(serializers.Serializer):
-    party_size = serializers.IntegerField(min_value=1)
-
-
 class BookingContactUpdateRequestSerializer(serializers.Serializer):
     contact_name = serializers.CharField(required=False, allow_blank=True, default="")
     contact_phone = serializers.CharField(required=False, allow_blank=True, default="")
@@ -196,7 +188,6 @@ class BookingListResponseSerializer(serializers.Serializer):
 class StaffBookingCreateRequestSerializer(serializers.Serializer):
     time_slot_id = serializers.IntegerField()
     service_id = serializers.IntegerField()
-    party_size = serializers.IntegerField(min_value=1, default=1)
     customer_id = serializers.IntegerField(required=False, allow_null=True)
     contact_name = serializers.CharField(required=False, allow_blank=True, default="")
     contact_phone = serializers.CharField(required=False, allow_blank=True, default="")
@@ -205,7 +196,6 @@ class StaffBookingCreateRequestSerializer(serializers.Serializer):
 class StaffBookingResponseSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     status = serializers.CharField()
-    party_size = serializers.IntegerField()
     contact_name = serializers.CharField()
     contact_phone = serializers.CharField()
     customer_phone = serializers.CharField(required=False)

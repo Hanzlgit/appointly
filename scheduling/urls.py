@@ -34,11 +34,6 @@ urlpatterns = [
         name="scheduling-booking-reschedule",
     ),
     path(
-        "bookings/<int:booking_id>/party-size/",
-        views.BookingPartySizeUpdateView.as_view(),
-        name="scheduling-booking-party-size",
-    ),
-    path(
         "bookings/<int:booking_id>/contact/",
         views.BookingContactUpdateView.as_view(),
         name="scheduling-booking-contact",

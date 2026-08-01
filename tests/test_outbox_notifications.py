@@ -84,7 +84,6 @@ class OutboxBookingTransactionTests(TestCase):
             customer=self.customer,
             idempotency_key="create-1",
             service_id=self.service.id,
-            party_size=1,
             time_slot_id=self.time_slot.id,
         )
 
@@ -110,7 +109,6 @@ class OutboxBookingTransactionTests(TestCase):
             customer=self.customer,
             idempotency_key="fill-slot",
             service_id=self.service.id,
-            party_size=1,
             time_slot_id=full_slot.id,
         )
 
@@ -124,7 +122,6 @@ class OutboxBookingTransactionTests(TestCase):
                 customer=other_customer,
                 idempotency_key="fail-capacity",
                 service_id=self.service.id,
-                party_size=1,
                 time_slot_id=full_slot.id,
             )
 
@@ -342,7 +339,6 @@ class InAppNotificationRecipientTests(APITestCase):
             customer=self.customer,
             idempotency_key="lifecycle-1",
             service_id=self.service.id,
-            party_size=1,
             time_slot_id=self.time_slot.id,
         )
         self._consume_pending_outbox()
@@ -359,7 +355,6 @@ class InAppNotificationRecipientTests(APITestCase):
             time_slot=self.other_slot,
             service=self.service,
             status=BookingStatus.PENDING,
-            party_size=1,
             idempotency_key="pending-1",
         )
         scheduling_booking_confirm(booking=pending)
@@ -390,7 +385,6 @@ class InAppNotificationRecipientTests(APITestCase):
             customer=self.customer,
             idempotency_key="resched-src",
             service_id=self.service.id,
-            party_size=1,
             time_slot_id=self.time_slot.id,
         )
         new_booking = scheduling_booking_reschedule(
@@ -414,7 +408,6 @@ class InAppNotificationRecipientTests(APITestCase):
             customer=self.customer,
             idempotency_key="api-list",
             service_id=self.service.id,
-            party_size=1,
             time_slot_id=self.time_slot.id,
         )
         self._consume_pending_outbox()
@@ -585,7 +578,6 @@ class ReminderAndSmsTests(TestCase):
             time_slot=time_slot,
             service=self.service,
             status=BookingStatus.CONFIRMED,
-            party_size=1,
             idempotency_key="reminder-booking",
         )
 

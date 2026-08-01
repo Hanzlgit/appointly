@@ -4,7 +4,6 @@ from zoneinfo import ZoneInfo
 
 from catalog.models import Resource, Service
 from django.contrib.auth.models import User
-from django.db.models import Sum
 from tenants.models import Tenant, TenantRole
 
 from scheduling.models import Booking, ScheduleRule, TimeSlot, TimeSlotStatus
@@ -143,13 +142,10 @@ def scheduling_timeslot_remaining_capacity(*, time_slot: TimeSlot) -> int:
     Returns:
         int: 剩余容量（不小于 0）。
     """
-    used = (
-        Booking.objects.filter(
-            time_slot=time_slot,
-            status__in=ACTIVE_BOOKING_STATUSES,
-        ).aggregate(total=Sum("party_size"))["total"]
-        or 0
-    )
+    used = Booking.objects.filter(
+        time_slot=time_slot,
+        status__in=ACTIVE_BOOKING_STATUSES,
+    ).count()
     return max(0, time_slot.capacity - used)
 
 
@@ -436,7 +432,6 @@ def scheduling_booking_to_dict(
     payload = {
         "id": booking.id,
         "status": booking.status,
-        "party_size": booking.party_size,
         "contact_name": booking.contact_name,
         "service_id": booking.service_id,
         "service_name": service.name,

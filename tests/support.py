@@ -59,7 +59,6 @@ def booking_create_for_test(
     *,
     tenant: Tenant,
     time_slot,
-    party_size: int = 1,
     status: str = BookingStatus.CONFIRMED,
     idempotency_key: str = "test-booking",
     service: Service | None = None,
@@ -70,7 +69,6 @@ def booking_create_for_test(
     Args:
         tenant (Tenant): 所属租户。
         time_slot: 固定时段实例。
-        party_size (int): 预约人数。
         status (str): 预约状态。
         idempotency_key (str): 幂等键。
         service (Service | None): 服务项目；省略时使用租户首个服务。
@@ -100,6 +98,5 @@ def booking_create_for_test(
         time_slot=time_slot,
         service=service,
         status=status,
-        party_size=party_size,
         idempotency_key=idempotency_key,
     )

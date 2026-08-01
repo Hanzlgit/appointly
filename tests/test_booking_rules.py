@@ -156,7 +156,6 @@ class BookingRulesTests(APITestCase):
         body = {
             "time_slot_id": self.time_slot.id,
             "service_id": self.service.id,
-            "party_size": 1,
         }
         body.update(payload)
         headers = {}
@@ -254,7 +253,6 @@ class BookingRulesTests(APITestCase):
                 {
                     "time_slot_id": self.time_slot.id,
                     "service_id": self.service.id,
-                    "party_size": 1,
                 },
                 format="json",
                 HTTP_IDEMPOTENCY_KEY=str(uuid4()),

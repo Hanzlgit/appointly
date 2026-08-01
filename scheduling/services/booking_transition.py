@@ -277,10 +277,7 @@ def scheduling_booking_reschedule(
             customer=locked_booking.customer,
             time_slot=time_slot,
         )
-        _scheduling_booking_validate_capacity(
-            time_slot=time_slot,
-            party_size=locked_booking.party_size,
-        )
+        _scheduling_booking_validate_capacity(time_slot=time_slot)
 
         settings = scheduling_booking_settings_get_for_tenant(tenant=locked_booking.tenant)
         _scheduling_booking_validate_booking_rules_for_reschedule(
@@ -303,7 +300,6 @@ def scheduling_booking_reschedule(
             time_slot=time_slot,
             service=service,
             status=status,
-            party_size=locked_booking.party_size,
             contact_name=locked_booking.contact_name,
             contact_phone=locked_booking.contact_phone,
             idempotency_key=idempotency_key,
@@ -364,42 +360,6 @@ def _scheduling_booking_validate_booking_rules_for_reschedule(
     )
     if future_active_count >= settings.future_booking_limit:
         raise ValidationError("您已达到未来有效预约数量上限。")
-
-
-def scheduling_booking_party_size_update(
-    *,
-    booking: Booking,
-    party_size: int,
-) -> Booking:
-    """客户修改预约人数；增加时校验容量，减少时立即释放。
-
-    Args:
-        booking (Booking): 目标预约。
-        party_size (int): 新人数。
-
-    Returns:
-        Booking: 更新后的预约。
-
-    Raises:
-        ValidationError: 不可修改或容量不足。
-    """
-    from scheduling.services.booking_create import _scheduling_booking_remaining_capacity
-
-    _scheduling_booking_ensure_customer_modifiable(booking=booking)
-    _scheduling_booking_ensure_before_cancel_deadline(booking=booking)
-
-    if party_size == booking.party_size:
-        return booking
-
-    if party_size > booking.party_size:
-        delta = party_size - booking.party_size
-        remaining = _scheduling_booking_remaining_capacity(time_slot=booking.time_slot)
-        if remaining < delta:
-            raise ValidationError("该时段容量不足。")
-
-    booking.party_size = party_size
-    booking.save(update_fields=["party_size", "updated_at"])
-    return booking
 
 
 def scheduling_booking_complete(*, booking: Booking) -> Booking:

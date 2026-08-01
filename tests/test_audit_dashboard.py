@@ -226,7 +226,6 @@ class AuditDashboardTests(APITestCase):
                 {
                     "time_slot_id": self.time_slot.id,
                     "service_id": self.service.id,
-                    "party_size": 1,
                     "customer_id": self.customer.id,
                 },
                 format="json",
