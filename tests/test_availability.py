@@ -164,3 +164,32 @@ class AvailabilityQueryTests(APITestCase):
 
         second = self._query_availability(resource_id=self.resource.id)
         self.assertEqual(api_data(second)["slots"][0]["remaining_capacity"], 1)
+
+    def test_inactive_resource_excluded_from_availability(self):
+        """停用资源后其时段不再参与可用性查询。"""
+        inactive_resource = Resource.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            name="Bob",
+            is_active=False,
+        )
+        self.service.resources.add(inactive_resource)
+        TimeSlot.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            resource=inactive_resource,
+            start=self.slot_start,
+            end=self.slot_end,
+            capacity=2,
+            status=TimeSlotStatus.OPEN,
+        )
+
+        resource_response = self._query_availability(resource_id=inactive_resource.id)
+        self.assertEqual(resource_response.status_code, 200)
+        self.assertEqual(api_data(resource_response)["slots"], [])
+
+        aggregate_response = self._query_availability(service_id=self.service.id)
+        self.assertEqual(aggregate_response.status_code, 200)
+        payload = api_data(aggregate_response)
+        self.assertEqual(len(payload["availability"]), 1)
+        self.assertEqual(payload["availability"][0]["remaining_capacity"], 3)

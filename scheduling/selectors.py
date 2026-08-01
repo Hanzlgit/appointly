@@ -173,9 +173,14 @@ def scheduling_availability_slots_for_resource(
     Returns:
         list[dict]: 含剩余容量的时段字典列表。
     """
+    resource = Resource.objects.filter(tenant=tenant, id=resource_id).only("is_active").first()
+    if resource is None or not resource.is_active:
+        return []
+
     queryset = TimeSlot.objects.filter(
         tenant=tenant,
         resource_id=resource_id,
+        resource__is_active=True,
         status=TimeSlotStatus.OPEN,
         start__lt=end,
         end__gt=start,
@@ -225,6 +230,7 @@ def scheduling_availability_aggregate(
     queryset = (
         TimeSlot.objects.filter(
             tenant=tenant,
+            resource__is_active=True,
             status=TimeSlotStatus.OPEN,
             start__lt=end,
             end__gt=start,
@@ -240,7 +246,9 @@ def scheduling_availability_aggregate(
     if service_id is not None:
         services = services.filter(id=service_id)
     for service in services:
-        service_resources[service.id] = {resource.id for resource in service.resources.all()}
+        service_resources[service.id] = {
+            resource.id for resource in service.resources.all() if resource.is_active
+        }
 
     aggregates: dict[tuple[int, int, str, str], int] = defaultdict(int)
     for time_slot in queryset:

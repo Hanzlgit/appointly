@@ -3,6 +3,7 @@ from django.db import transaction
 from tenants.models import Tenant
 
 from catalog.models import Location, Resource
+from scheduling.services.availability_cache import scheduling_availability_cache_invalidate
 
 
 @transaction.atomic
@@ -70,6 +71,8 @@ def catalog_resource_update(
 
     resource.full_clean()
     resource.save()
+    if is_active is not None:
+        scheduling_availability_cache_invalidate(tenant_id=tenant.id)
     return resource
 
 

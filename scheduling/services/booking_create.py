@@ -287,7 +287,12 @@ def _scheduling_booking_validate_time_slot(
     if time_slot.status != TimeSlotStatus.OPEN:
         raise ValidationError("固定时段已关闭，无法预约。")
 
-    service_resource_ids = {resource.id for resource in service.resources.all()}
+    if not time_slot.resource.is_active:
+        raise ValidationError("该资源已停用，无法预约。")
+
+    service_resource_ids = {
+        resource.id for resource in service.resources.all() if resource.is_active
+    }
     if time_slot.resource_id not in service_resource_ids:
         raise ValidationError("该服务不可在此资源上预约。")
 
