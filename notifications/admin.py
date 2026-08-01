@@ -5,7 +5,7 @@ from notifications.models import Notification, OutboxEvent, ProcessedEvent
 
 @admin.register(OutboxEvent)
 class OutboxEventAdmin(admin.ModelAdmin):
-    list_display = ("event_id", "event_type", "tenant", "published_at", "created_at")
+    list_display = ("event_id", "event_type", "published_at", "created_at")
     list_filter = ("event_type", "published_at")
     search_fields = ("event_id", "aggregate_id")
 
@@ -17,5 +17,5 @@ class ProcessedEventAdmin(admin.ModelAdmin):
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
-    list_display = ("notification_type", "recipient", "tenant", "read_at", "created_at")
+    list_display = ("notification_type", "recipient", "read_at", "created_at")
     list_filter = ("notification_type", "read_at")

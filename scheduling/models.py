@@ -43,8 +43,8 @@ class ScheduleRule(models.Model):
         on_delete=models.CASCADE,
         related_name="schedule_rules",
     )
-    resource = models.ForeignKey(
-        "catalog.Resource",
+    stylist = models.ForeignKey(
+        "catalog.Stylist",
         on_delete=models.CASCADE,
         related_name="schedule_rules",
     )
@@ -95,8 +95,8 @@ class TimeSlot(models.Model):
         on_delete=models.CASCADE,
         related_name="time_slots",
     )
-    resource = models.ForeignKey(
-        "catalog.Resource",
+    stylist = models.ForeignKey(
+        "catalog.Stylist",
         on_delete=models.CASCADE,
         related_name="time_slots",
     )
@@ -122,8 +122,8 @@ class TimeSlot(models.Model):
         ordering = ["start"]
         constraints = [
             models.UniqueConstraint(
-                fields=["resource", "start", "end"],
-                name="unique_resource_timeslot_start_end",
+                fields=["stylist", "start", "end"],
+                name="unique_stylist_timeslot_start_end",
             ),
         ]
         verbose_name = "固定时段"

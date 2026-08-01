@@ -60,7 +60,6 @@ class CustomerVerificationCodeCreateRequestSerializer(serializers.Serializer):
 class CustomerSessionCreateRequestSerializer(serializers.Serializer):
     phone = PhoneField()
     code = serializers.CharField(help_text="短信验证码", max_length=16)
-    tenant_slug = serializers.SlugField(help_text="租户 slug，用于建立租户客户档案")
 
 
 class CustomerSessionCreateResponseSerializer(serializers.Serializer):

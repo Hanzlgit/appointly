@@ -6,7 +6,6 @@ import uuid
 from typing import Any
 
 from django.utils import timezone
-from tenants.models import Tenant
 
 from notifications.models import OutboxEvent
 from notifications.services.messaging import message_broker_get
@@ -14,7 +13,6 @@ from notifications.services.messaging import message_broker_get
 
 def outbox_event_write(
     *,
-    tenant: Tenant,
     event_type: str,
     aggregate_type: str,
     aggregate_id: int,
@@ -24,7 +22,6 @@ def outbox_event_write(
     """在当前数据库事务中写入 Outbox 事件。
 
     Args:
-        tenant (Tenant): 所属租户。
         event_type (str): 事件类型。
         aggregate_type (str): 聚合根类型。
         aggregate_id (int): 聚合根 ID。
@@ -36,7 +33,6 @@ def outbox_event_write(
     """
     return OutboxEvent.objects.create(
         event_id=event_id or uuid.uuid4(),
-        tenant=tenant,
         event_type=event_type,
         aggregate_type=aggregate_type,
         aggregate_id=aggregate_id,

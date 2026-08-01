@@ -1,3 +1,4 @@
+from accounts.permissions import RequiresStaff
 from appointly.api.envelope import api_response
 from appointly.api.openapi import enveloped_response_serializer
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -7,56 +8,58 @@ from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from tenants.permissions import RequiresTenantAdmin, RequiresTenantMembership
-from tenants.views import TenantContextMixin
 
-from catalog.models import Location, Resource, Service
+from catalog.models import Location, Service, Stylist
 from catalog.selectors import (
-    catalog_location_get_for_tenant,
-    catalog_location_list_active_for_tenant,
-    catalog_location_list_for_tenant,
+    catalog_location_get,
+    catalog_location_list_paginated,
     catalog_location_to_dict,
     catalog_public_location_to_dict,
     catalog_public_service_to_dict,
-    catalog_resource_get_for_location,
-    catalog_resource_list_for_location,
-    catalog_resource_to_dict,
-    catalog_service_get_for_location,
-    catalog_service_list_active_for_tenant,
-    catalog_service_list_for_location,
+    catalog_public_stylist_to_dict,
+    catalog_service_get_for_stylist,
+    catalog_service_list_for_stylist_paginated,
     catalog_service_to_dict,
+    catalog_stylist_get,
+    catalog_stylist_get_for_location,
+    catalog_stylist_list_for_location_paginated,
+    catalog_stylist_to_dict,
 )
 from catalog.serializers import (
+    CatalogListQuerySerializer,
     CatalogLocationCreateRequestSerializer,
-    CatalogLocationListResponseSerializer,
     CatalogLocationResponseSerializer,
     CatalogLocationUpdateRequestSerializer,
-    CatalogPublicBrowseResponseSerializer,
+    CatalogPaginatedLocationListResponseSerializer,
+    CatalogPaginatedPublicLocationListResponseSerializer,
+    CatalogPaginatedPublicStylistListResponseSerializer,
+    CatalogPaginatedPublicServiceListResponseSerializer,
+    CatalogPaginatedServiceListResponseSerializer,
+    CatalogPaginatedStylistListResponseSerializer,
     CatalogPublicLocationResponseSerializer,
     CatalogPublicServiceResponseSerializer,
-    CatalogResourceCreateRequestSerializer,
-    CatalogResourceListResponseSerializer,
-    CatalogResourceResponseSerializer,
-    CatalogResourceUpdateRequestSerializer,
+    CatalogPublicStylistResponseSerializer,
     CatalogServiceCreateRequestSerializer,
-    CatalogServiceListResponseSerializer,
     CatalogServiceResponseSerializer,
     CatalogServiceUpdateRequestSerializer,
+    CatalogStylistCreateRequestSerializer,
+    CatalogStylistResponseSerializer,
+    CatalogStylistUpdateRequestSerializer,
 )
 from catalog.services.location import (
     catalog_location_create,
     catalog_location_delete,
     catalog_location_update,
 )
-from catalog.services.resource import (
-    catalog_resource_create,
-    catalog_resource_delete,
-    catalog_resource_update,
-)
 from catalog.services.service import (
     catalog_service_create,
     catalog_service_delete,
     catalog_service_update,
+)
+from catalog.services.stylist import (
+    catalog_stylist_create,
+    catalog_stylist_delete,
+    catalog_stylist_update,
 )
 
 
@@ -76,58 +79,123 @@ def _raise_drf_validation_error(exc: DjangoValidationError) -> None:
     raise DRFValidationError(str(exc)) from exc
 
 
-class CatalogLocationListCreateView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+def _request_is_staff(request) -> bool:
+    """判断请求是否来自后台工作人员。
+
+    Args:
+        request: DRF 请求对象。
+
+    Returns:
+        bool: 工作人员或超管时返回 ``True``。
+    """
+    user = request.user
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or hasattr(user, "staff_profile")),
+    )
+
+
+def _parse_list_query(request) -> dict:
+    """解析并校验列表查询参数。
+
+    Args:
+        request: DRF 请求对象。
+
+    Returns:
+        dict: 校验后的 ``page``、``page_size``、``q`` 字段。
+    """
+    query_serializer = CatalogListQuerySerializer(data=request.query_params)
+    query_serializer.is_valid(raise_exception=True)
+    return query_serializer.validated_data
+
+
+class CatalogLocationListCreateView(APIView):
+    """门店列表（公开）与创建（后台）。"""
+
+    def get_permissions(self):
+        """按 HTTP 方法返回权限类。
+
+        Returns:
+            list: POST 需工作人员权限，GET 公开。
+        """
+        if self.request.method == "POST":
+            return [RequiresStaff()]
+        return []
 
     @extend_schema(
-        summary="列出服务地点",
-        responses={200: enveloped_response_serializer(CatalogLocationListResponseSerializer)},
+        summary="列出门店",
+        parameters=[CatalogListQuerySerializer],
+        responses={
+            200: enveloped_response_serializer(CatalogPaginatedPublicLocationListResponseSerializer),
+        },
     )
     def get(self, request, *args, **kwargs):
-        """列出租户下的服务地点。
+        """公开列出启用门店；工作人员可查看全部门店。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含 ``locations`` 列表的标准 envelope 响应。
+            Response: 分页门店列表 envelope 响应。
         """
-        tenant = self.get_tenant()
-        locations = catalog_location_list_for_tenant(tenant=tenant)
-        response_serializer = CatalogLocationListResponseSerializer(
-            {
-                "locations": [
-                    CatalogLocationResponseSerializer(
-                        catalog_location_to_dict(location=location)
-                    ).data
-                    for location in locations
-                ],
-            }
+        validated = _parse_list_query(request)
+        is_staff = _request_is_staff(request)
+        result = catalog_location_list_paginated(
+            page=validated["page"],
+            page_size=validated["page_size"],
+            q=validated["q"],
+            active_only=not is_staff,
         )
+
+        if is_staff:
+            response_serializer = CatalogPaginatedLocationListResponseSerializer(
+                {
+                    "items": [
+                        CatalogLocationResponseSerializer(catalog_location_to_dict(location=item)).data
+                        for item in result.items
+                    ],
+                    "total": result.total,
+                    "page": validated["page"],
+                    "page_size": validated["page_size"],
+                }
+            )
+        else:
+            response_serializer = CatalogPaginatedPublicLocationListResponseSerializer(
+                {
+                    "items": [
+                        CatalogPublicLocationResponseSerializer(
+                            catalog_public_location_to_dict(location=item)
+                        ).data
+                        for item in result.items
+                    ],
+                    "total": result.total,
+                    "page": validated["page"],
+                    "page_size": validated["page_size"],
+                }
+            )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="创建服务地点",
+        summary="创建门店",
         request=CatalogLocationCreateRequestSerializer,
         responses={201: enveloped_response_serializer(CatalogLocationResponseSerializer)},
     )
     def post(self, request, *args, **kwargs):
-        """在租户下创建服务地点。
+        """创建门店。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含新地点的标准 envelope 响应，HTTP 201。
+            Response: 含新门店的标准 envelope 响应，HTTP 201。
         """
-        tenant = self.get_tenant()
         request_serializer = CatalogLocationCreateRequestSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
         try:
             location = catalog_location_create(
-                tenant=tenant,
                 name=validated_data["name"],
                 address=validated_data.get("address", ""),
             )
@@ -145,37 +213,38 @@ class CatalogLocationListCreateView(TenantContextMixin, APIView):
         )
 
 
-class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+class CatalogLocationRetrieveUpdateDestroyView(APIView):
+    """门店详情、更新与删除（后台）。"""
+
+    permission_classes = [RequiresStaff]
 
     def _get_location(self) -> Location:
-        """从 URL 解析并返回当前租户下的地点。
+        """从 URL 解析并返回门店。
 
         Returns:
-            Location: 匹配的服务地点。
+            Location: 匹配的门店。
 
         Raises:
-            NotFound: 地点不存在。
+            NotFound: 门店不存在。
         """
-        tenant = self.get_tenant()
         location_id = self.kwargs["location_id"]
         try:
-            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+            return catalog_location_get(location_id=location_id)
         except Location.DoesNotExist as exc:
-            raise NotFound("服务地点不存在。") from exc
+            raise NotFound("门店不存在。") from exc
 
     @extend_schema(
-        summary="获取服务地点",
+        summary="获取门店",
         responses={200: enveloped_response_serializer(CatalogLocationResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """获取单个服务地点详情。
+        """获取单个门店详情。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含地点字段的标准 envelope 响应。
+            Response: 含门店字段的标准 envelope 响应。
         """
         location = self._get_location()
         response_serializer = CatalogLocationResponseSerializer(
@@ -184,20 +253,19 @@ class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="更新服务地点",
+        summary="更新门店",
         request=CatalogLocationUpdateRequestSerializer,
         responses={200: enveloped_response_serializer(CatalogLocationResponseSerializer)},
     )
     def patch(self, request, *args, **kwargs):
-        """部分更新服务地点。
+        """部分更新门店。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含更新后地点的标准 envelope 响应。
+            Response: 含更新后门店的标准 envelope 响应。
         """
-        tenant = self.get_tenant()
         location = self._get_location()
         request_serializer = CatalogLocationUpdateRequestSerializer(data=request.data, partial=True)
         request_serializer.is_valid(raise_exception=True)
@@ -205,7 +273,6 @@ class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
 
         try:
             location = catalog_location_update(
-                tenant=tenant,
                 location=location,
                 name=validated_data.get("name"),
                 address=validated_data.get("address"),
@@ -219,9 +286,9 @@ class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
-    @extend_schema(summary="删除服务地点", responses={204: None})
+    @extend_schema(summary="删除门店", responses={204: None})
     def delete(self, request, *args, **kwargs):
-        """物理删除未被引用的服务地点。
+        """物理删除未被引用的门店。
 
         Args:
             request: DRF 请求对象。
@@ -229,92 +296,128 @@ class CatalogLocationRetrieveUpdateDestroyView(TenantContextMixin, APIView):
         Returns:
             Response: HTTP 204 空响应。
         """
-        tenant = self.get_tenant()
         location = self._get_location()
         try:
-            catalog_location_delete(tenant=tenant, location=location)
+            catalog_location_delete(location=location)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CatalogLocationResourceListCreateView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+class CatalogLocationStylistListCreateView(APIView):
+    """门店理发师列表（公开）与创建（后台）。"""
 
-    def _get_location(self) -> Location:
-        """从 URL 解析并返回当前租户下的地点。
+    def get_permissions(self):
+        """按 HTTP 方法返回权限类。
 
         Returns:
-            Location: 匹配的服务地点。
+            list: POST 需工作人员权限，GET 公开。
+        """
+        if self.request.method == "POST":
+            return [RequiresStaff()]
+        return []
+
+    def _get_location(self) -> Location:
+        """从 URL 解析并返回门店。
+
+        Returns:
+            Location: 匹配的门店。
 
         Raises:
-            NotFound: 地点不存在。
+            NotFound: 门店不存在。
         """
-        tenant = self.get_tenant()
         location_id = self.kwargs["location_id"]
         try:
-            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+            return catalog_location_get(location_id=location_id)
         except Location.DoesNotExist as exc:
-            raise NotFound("服务地点不存在。") from exc
+            raise NotFound("门店不存在。") from exc
 
     @extend_schema(
-        summary="列出地点下的可预约资源",
-        responses={200: enveloped_response_serializer(CatalogResourceListResponseSerializer)},
+        summary="列出门店下的理发师",
+        parameters=[CatalogListQuerySerializer],
+        responses={
+            200: enveloped_response_serializer(CatalogPaginatedPublicStylistListResponseSerializer),
+        },
     )
     def get(self, request, *args, **kwargs):
-        """列出指定地点下的可预约资源。
+        """公开列出启用理发师；工作人员可查看全部。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含 ``resources`` 列表的标准 envelope 响应。
+            Response: 分页理发师列表 envelope 响应。
         """
         location = self._get_location()
-        resources = catalog_resource_list_for_location(location=location)
-        response_serializer = CatalogResourceListResponseSerializer(
-            {
-                "resources": [
-                    CatalogResourceResponseSerializer(
-                        catalog_resource_to_dict(resource=resource)
-                    ).data
-                    for resource in resources
-                ],
-            }
+        validated = _parse_list_query(request)
+        is_staff = _request_is_staff(request)
+        result = catalog_stylist_list_for_location_paginated(
+            location=location,
+            page=validated["page"],
+            page_size=validated["page_size"],
+            q=validated["q"],
+            active_only=not is_staff,
         )
+
+        if is_staff:
+            response_serializer = CatalogPaginatedStylistListResponseSerializer(
+                {
+                    "items": [
+                        CatalogStylistResponseSerializer(catalog_stylist_to_dict(stylist=item)).data
+                        for item in result.items
+                    ],
+                    "total": result.total,
+                    "page": validated["page"],
+                    "page_size": validated["page_size"],
+                }
+            )
+        else:
+            response_serializer = CatalogPaginatedPublicStylistListResponseSerializer(
+                {
+                    "items": [
+                        CatalogPublicStylistResponseSerializer(
+                            catalog_public_stylist_to_dict(stylist=item)
+                        ).data
+                        for item in result.items
+                    ],
+                    "total": result.total,
+                    "page": validated["page"],
+                    "page_size": validated["page_size"],
+                }
+            )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="在地点下创建可预约资源",
-        request=CatalogResourceCreateRequestSerializer,
-        responses={201: enveloped_response_serializer(CatalogResourceResponseSerializer)},
+        summary="在门店下创建理发师",
+        request=CatalogStylistCreateRequestSerializer,
+        responses={201: enveloped_response_serializer(CatalogStylistResponseSerializer)},
     )
     def post(self, request, *args, **kwargs):
-        """在指定地点下创建可预约资源。
+        """在指定门店下创建理发师。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含新资源的标准 envelope 响应，HTTP 201。
+            Response: 含新理发师的标准 envelope 响应，HTTP 201。
         """
-        tenant = self.get_tenant()
         location = self._get_location()
-        request_serializer = CatalogResourceCreateRequestSerializer(data=request.data)
+        request_serializer = CatalogStylistCreateRequestSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
         try:
-            resource = catalog_resource_create(
-                tenant=tenant,
+            stylist = catalog_stylist_create(
                 location=location,
                 name=validated_data["name"],
+                ticket_prefix=validated_data.get("ticket_prefix", ""),
+                queue_status=validated_data.get("queue_status"),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
 
-        response_serializer = CatalogResourceResponseSerializer(
-            catalog_resource_to_dict(resource=resource)
+        response_serializer = CatalogStylistResponseSerializer(
+            catalog_stylist_to_dict(stylist=stylist)
         )
         return api_response(
             request,
@@ -324,107 +427,103 @@ class CatalogLocationResourceListCreateView(TenantContextMixin, APIView):
         )
 
 
-class CatalogLocationResourceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+class CatalogLocationStylistRetrieveUpdateDestroyView(APIView):
+    """门店理发师详情、更新与删除（后台）。"""
+
+    permission_classes = [RequiresStaff]
 
     def _get_location(self) -> Location:
-        """从 URL 解析并返回当前租户下的地点。
+        """从 URL 解析并返回门店。
 
         Returns:
-            Location: 匹配的服务地点。
+            Location: 匹配的门店。
 
         Raises:
-            NotFound: 地点不存在。
+            NotFound: 门店不存在。
         """
-        tenant = self.get_tenant()
         location_id = self.kwargs["location_id"]
         try:
-            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
+            return catalog_location_get(location_id=location_id)
         except Location.DoesNotExist as exc:
-            raise NotFound("服务地点不存在。") from exc
+            raise NotFound("门店不存在。") from exc
 
-    def _get_resource(self, *, location: Location) -> Resource:
-        """从 URL 解析并返回指定地点下的资源。
+    def _get_stylist(self, *, location: Location) -> Stylist:
+        """从 URL 解析并返回指定门店下的理发师。
 
         Args:
-            location (Location): 所属地点。
+            location (Location): 所属门店。
 
         Returns:
-            Resource: 匹配的可预约资源。
+            Stylist: 匹配的理发师。
 
         Raises:
-            NotFound: 资源不存在。
+            NotFound: 理发师不存在。
         """
-        tenant = self.get_tenant()
-        resource_id = self.kwargs["resource_id"]
+        stylist_id = self.kwargs["stylist_id"]
         try:
-            return catalog_resource_get_for_location(
-                tenant=tenant,
-                location=location,
-                resource_id=resource_id,
-            )
-        except Resource.DoesNotExist as exc:
-            raise NotFound("可预约资源不存在。") from exc
+            return catalog_stylist_get_for_location(location=location, stylist_id=stylist_id)
+        except Stylist.DoesNotExist as exc:
+            raise NotFound("理发师不存在。") from exc
 
     @extend_schema(
-        summary="获取地点下的可预约资源",
-        responses={200: enveloped_response_serializer(CatalogResourceResponseSerializer)},
+        summary="获取门店下的理发师",
+        responses={200: enveloped_response_serializer(CatalogStylistResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """获取指定地点下的单个可预约资源。
+        """获取指定门店下的单个理发师。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含资源字段的标准 envelope 响应。
+            Response: 含理发师字段的标准 envelope 响应。
         """
         location = self._get_location()
-        resource = self._get_resource(location=location)
-        response_serializer = CatalogResourceResponseSerializer(
-            catalog_resource_to_dict(resource=resource)
+        stylist = self._get_stylist(location=location)
+        response_serializer = CatalogStylistResponseSerializer(
+            catalog_stylist_to_dict(stylist=stylist)
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="更新地点下的可预约资源",
-        request=CatalogResourceUpdateRequestSerializer,
-        responses={200: enveloped_response_serializer(CatalogResourceResponseSerializer)},
+        summary="更新门店下的理发师",
+        request=CatalogStylistUpdateRequestSerializer,
+        responses={200: enveloped_response_serializer(CatalogStylistResponseSerializer)},
     )
     def patch(self, request, *args, **kwargs):
-        """部分更新指定地点下的可预约资源。
+        """部分更新指定门店下的理发师。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含更新后资源的标准 envelope 响应。
+            Response: 含更新后理发师的标准 envelope 响应。
         """
-        tenant = self.get_tenant()
         location = self._get_location()
-        resource = self._get_resource(location=location)
-        request_serializer = CatalogResourceUpdateRequestSerializer(data=request.data, partial=True)
+        stylist = self._get_stylist(location=location)
+        request_serializer = CatalogStylistUpdateRequestSerializer(data=request.data, partial=True)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
         try:
-            resource = catalog_resource_update(
-                tenant=tenant,
-                resource=resource,
+            stylist = catalog_stylist_update(
+                stylist=stylist,
                 name=validated_data.get("name"),
+                ticket_prefix=validated_data.get("ticket_prefix"),
+                queue_status=validated_data.get("queue_status"),
                 is_active=validated_data.get("is_active"),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
 
-        response_serializer = CatalogResourceResponseSerializer(
-            catalog_resource_to_dict(resource=resource)
+        response_serializer = CatalogStylistResponseSerializer(
+            catalog_stylist_to_dict(stylist=stylist)
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
-    @extend_schema(summary="删除地点下的可预约资源", responses={204: None})
+    @extend_schema(summary="删除门店下的理发师", responses={204: None})
     def delete(self, request, *args, **kwargs):
-        """物理删除指定地点下未被引用的可预约资源。
+        """物理删除指定门店下未被引用的理发师。
 
         Args:
             request: DRF 请求对象。
@@ -432,67 +531,105 @@ class CatalogLocationResourceRetrieveUpdateDestroyView(TenantContextMixin, APIVi
         Returns:
             Response: HTTP 204 空响应。
         """
-        tenant = self.get_tenant()
         location = self._get_location()
-        resource = self._get_resource(location=location)
+        stylist = self._get_stylist(location=location)
         try:
-            catalog_resource_delete(tenant=tenant, resource=resource)
+            catalog_stylist_delete(stylist=stylist)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class CatalogLocationServiceListCreateView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+class CatalogStylistServiceListCreateView(APIView):
+    """理发师服务项目列表（公开）与创建（后台）。"""
 
-    def _get_location(self) -> Location:
-        """从 URL 解析并返回当前租户下的地点。
+    def get_permissions(self):
+        """按 HTTP 方法返回权限类。
 
         Returns:
-            Location: 匹配的服务地点。
+            list: POST 需工作人员权限，GET 公开。
+        """
+        if self.request.method == "POST":
+            return [RequiresStaff()]
+        return []
+
+    def _get_stylist(self) -> Stylist:
+        """从 URL 解析并返回理发师。
+
+        Returns:
+            Stylist: 匹配的理发师。
 
         Raises:
-            NotFound: 地点不存在。
+            NotFound: 理发师不存在。
         """
-        tenant = self.get_tenant()
-        location_id = self.kwargs["location_id"]
+        stylist_id = self.kwargs["stylist_id"]
         try:
-            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
-        except Location.DoesNotExist as exc:
-            raise NotFound("服务地点不存在。") from exc
+            return catalog_stylist_get(stylist_id=stylist_id)
+        except Stylist.DoesNotExist as exc:
+            raise NotFound("理发师不存在。") from exc
 
     @extend_schema(
-        summary="列出地点下的服务项目",
-        responses={200: enveloped_response_serializer(CatalogServiceListResponseSerializer)},
+        summary="列出理发师下的服务项目",
+        parameters=[CatalogListQuerySerializer],
+        responses={
+            200: enveloped_response_serializer(CatalogPaginatedPublicServiceListResponseSerializer),
+        },
     )
     def get(self, request, *args, **kwargs):
-        """列出指定地点下的服务项目。
+        """公开列出启用服务；工作人员可查看全部。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含 ``services`` 列表的标准 envelope 响应。
+            Response: 分页服务列表 envelope 响应。
         """
-        location = self._get_location()
-        services = catalog_service_list_for_location(location=location)
-        response_serializer = CatalogServiceListResponseSerializer(
-            {
-                "services": [
-                    CatalogServiceResponseSerializer(catalog_service_to_dict(service=service)).data
-                    for service in services
-                ],
-            }
+        stylist = self._get_stylist()
+        validated = _parse_list_query(request)
+        is_staff = _request_is_staff(request)
+        result = catalog_service_list_for_stylist_paginated(
+            stylist=stylist,
+            page=validated["page"],
+            page_size=validated["page_size"],
+            q=validated["q"],
+            active_only=not is_staff,
         )
+
+        if is_staff:
+            response_serializer = CatalogPaginatedServiceListResponseSerializer(
+                {
+                    "items": [
+                        CatalogServiceResponseSerializer(catalog_service_to_dict(service=item)).data
+                        for item in result.items
+                    ],
+                    "total": result.total,
+                    "page": validated["page"],
+                    "page_size": validated["page_size"],
+                }
+            )
+        else:
+            response_serializer = CatalogPaginatedPublicServiceListResponseSerializer(
+                {
+                    "items": [
+                        CatalogPublicServiceResponseSerializer(
+                            catalog_public_service_to_dict(service=item)
+                        ).data
+                        for item in result.items
+                    ],
+                    "total": result.total,
+                    "page": validated["page"],
+                    "page_size": validated["page_size"],
+                }
+            )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="在地点下创建服务项目",
+        summary="在理发师下创建服务项目",
         request=CatalogServiceCreateRequestSerializer,
         responses={201: enveloped_response_serializer(CatalogServiceResponseSerializer)},
     )
     def post(self, request, *args, **kwargs):
-        """在指定地点下创建服务项目。
+        """在指定理发师下创建服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -500,22 +637,19 @@ class CatalogLocationServiceListCreateView(TenantContextMixin, APIView):
         Returns:
             Response: 含新服务的标准 envelope 响应，HTTP 201。
         """
-        tenant = self.get_tenant()
-        location = self._get_location()
+        stylist = self._get_stylist()
         request_serializer = CatalogServiceCreateRequestSerializer(data=request.data)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
         try:
             service = catalog_service_create(
-                tenant=tenant,
-                location=location,
+                stylist=stylist,
                 name=validated_data["name"],
                 description=validated_data.get("description", ""),
                 duration_minutes=validated_data["duration_minutes"],
                 price_cents=validated_data.get("price_cents", 0),
                 currency=validated_data.get("currency", "CNY"),
-                resource_ids=validated_data.get("resource_ids"),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
@@ -531,30 +665,31 @@ class CatalogLocationServiceListCreateView(TenantContextMixin, APIView):
         )
 
 
-class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantMembership, RequiresTenantAdmin]
+class CatalogStylistServiceRetrieveUpdateDestroyView(APIView):
+    """理发师服务项目详情、更新与删除（后台）。"""
 
-    def _get_location(self) -> Location:
-        """从 URL 解析并返回当前租户下的地点。
+    permission_classes = [RequiresStaff]
+
+    def _get_stylist(self) -> Stylist:
+        """从 URL 解析并返回理发师。
 
         Returns:
-            Location: 匹配的服务地点。
+            Stylist: 匹配的理发师。
 
         Raises:
-            NotFound: 地点不存在。
+            NotFound: 理发师不存在。
         """
-        tenant = self.get_tenant()
-        location_id = self.kwargs["location_id"]
+        stylist_id = self.kwargs["stylist_id"]
         try:
-            return catalog_location_get_for_tenant(tenant=tenant, location_id=location_id)
-        except Location.DoesNotExist as exc:
-            raise NotFound("服务地点不存在。") from exc
+            return catalog_stylist_get(stylist_id=stylist_id)
+        except Stylist.DoesNotExist as exc:
+            raise NotFound("理发师不存在。") from exc
 
-    def _get_service(self, *, location: Location) -> Service:
-        """从 URL 解析并返回指定地点下的服务。
+    def _get_service(self, *, stylist: Stylist) -> Service:
+        """从 URL 解析并返回指定理发师下的服务。
 
         Args:
-            location (Location): 所属地点。
+            stylist (Stylist): 所属理发师。
 
         Returns:
             Service: 匹配的服务项目。
@@ -562,23 +697,18 @@ class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIVie
         Raises:
             NotFound: 服务不存在。
         """
-        tenant = self.get_tenant()
         service_id = self.kwargs["service_id"]
         try:
-            return catalog_service_get_for_location(
-                tenant=tenant,
-                location=location,
-                service_id=service_id,
-            )
+            return catalog_service_get_for_stylist(stylist=stylist, service_id=service_id)
         except Service.DoesNotExist as exc:
             raise NotFound("服务项目不存在。") from exc
 
     @extend_schema(
-        summary="获取地点下的服务项目",
+        summary="获取理发师下的服务项目",
         responses={200: enveloped_response_serializer(CatalogServiceResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """获取指定地点下的单个服务项目。
+        """获取指定理发师下的单个服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -586,20 +716,20 @@ class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIVie
         Returns:
             Response: 含服务字段的标准 envelope 响应。
         """
-        location = self._get_location()
-        service = self._get_service(location=location)
+        stylist = self._get_stylist()
+        service = self._get_service(stylist=stylist)
         response_serializer = CatalogServiceResponseSerializer(
             catalog_service_to_dict(service=service)
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
-        summary="更新地点下的服务项目",
+        summary="更新理发师下的服务项目",
         request=CatalogServiceUpdateRequestSerializer,
         responses={200: enveloped_response_serializer(CatalogServiceResponseSerializer)},
     )
     def patch(self, request, *args, **kwargs):
-        """部分更新指定地点下的服务项目。
+        """部分更新指定理发师下的服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -607,16 +737,14 @@ class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIVie
         Returns:
             Response: 含更新后服务的标准 envelope 响应。
         """
-        tenant = self.get_tenant()
-        location = self._get_location()
-        service = self._get_service(location=location)
+        stylist = self._get_stylist()
+        service = self._get_service(stylist=stylist)
         request_serializer = CatalogServiceUpdateRequestSerializer(data=request.data, partial=True)
         request_serializer.is_valid(raise_exception=True)
         validated_data = request_serializer.validated_data
 
         try:
             service = catalog_service_update(
-                tenant=tenant,
                 service=service,
                 name=validated_data.get("name"),
                 description=validated_data.get("description"),
@@ -624,7 +752,6 @@ class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIVie
                 price_cents=validated_data.get("price_cents"),
                 currency=validated_data.get("currency"),
                 is_active=validated_data.get("is_active"),
-                resource_ids=validated_data.get("resource_ids"),
             )
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
@@ -634,9 +761,9 @@ class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIVie
         )
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)
 
-    @extend_schema(summary="删除地点下的服务项目", responses={204: None})
+    @extend_schema(summary="删除理发师下的服务项目", responses={204: None})
     def delete(self, request, *args, **kwargs):
-        """物理删除指定地点下未被引用的服务项目。
+        """物理删除指定理发师下未被引用的服务项目。
 
         Args:
             request: DRF 请求对象。
@@ -644,50 +771,10 @@ class CatalogLocationServiceRetrieveUpdateDestroyView(TenantContextMixin, APIVie
         Returns:
             Response: HTTP 204 空响应。
         """
-        tenant = self.get_tenant()
-        location = self._get_location()
-        service = self._get_service(location=location)
+        stylist = self._get_stylist()
+        service = self._get_service(stylist=stylist)
         try:
-            catalog_service_delete(tenant=tenant, service=service)
+            catalog_service_delete(service=service)
         except DjangoValidationError as exc:
             _raise_drf_validation_error(exc)
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-class CatalogPublicBrowseView(TenantContextMixin, APIView):
-    authentication_classes = []
-    permission_classes = []
-
-    @extend_schema(
-        summary="浏览公开目录",
-        responses={200: enveloped_response_serializer(CatalogPublicBrowseResponseSerializer)},
-    )
-    def get(self, request, *args, **kwargs):
-        """返回租户启用的公开地点与服务目录。
-
-        Args:
-            request: DRF 请求对象。
-
-        Returns:
-            Response: 含 ``locations`` 与 ``services`` 的标准 envelope 响应。
-        """
-        tenant = self.get_tenant()
-        locations = catalog_location_list_active_for_tenant(tenant=tenant)
-        services = catalog_service_list_active_for_tenant(tenant=tenant)
-        response_serializer = CatalogPublicBrowseResponseSerializer(
-            {
-                "locations": [
-                    CatalogPublicLocationResponseSerializer(
-                        catalog_public_location_to_dict(location=location)
-                    ).data
-                    for location in locations
-                ],
-                "services": [
-                    CatalogPublicServiceResponseSerializer(
-                        catalog_public_service_to_dict(service=service)
-                    ).data
-                    for service in services
-                ],
-            }
-        )
-        return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)

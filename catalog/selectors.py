@@ -1,137 +1,316 @@
-from django.db.models import Count
+from __future__ import annotations
 
-from tenants.models import Tenant
+from dataclasses import dataclass
 
-from catalog.models import Location, Resource, Service
+from django.db.models import Count, Q
+
+from catalog.models import Location, Service, Stylist
+
+DEFAULT_CATALOG_PAGE_SIZE = 20
+MAX_CATALOG_PAGE_SIZE = 100
 
 
-def catalog_location_get_for_tenant(*, tenant: Tenant, location_id: int) -> Location:
-    """按 ID 查询租户下的服务地点。
+@dataclass(frozen=True)
+class CatalogListResult[T]:
+    """分页目录列表查询结果。"""
+
+    items: list[T]
+    total: int
+
+
+def catalog_location_has_unfinished_scheduling_references(*, location_id: int) -> bool:
+    """检查门店是否存在未完成的排班或预约引用。
 
     Args:
-        tenant (Tenant): 目标租户。
-        location_id (int): 地点 ID。
+        location_id (int): 门店 ID。
 
     Returns:
-        Location: 匹配的服务地点。
+        bool: 存在排班规则、固定时段或有效预约时返回 ``True``。
+    """
+    from scheduling.models import Booking, ScheduleRule, TimeSlot
+    from scheduling.services.booking import ACTIVE_BOOKING_STATUSES
+
+    if ScheduleRule.objects.filter(location_id=location_id).exists():
+        return True
+    if TimeSlot.objects.filter(location_id=location_id).exists():
+        return True
+    return Booking.objects.filter(
+        status__in=ACTIVE_BOOKING_STATUSES,
+        time_slot__location_id=location_id,
+    ).exists()
+
+
+def catalog_location_get(*, location_id: int) -> Location:
+    """按 ID 查询门店。
+
+    Args:
+        location_id (int): 门店 ID。
+
+    Returns:
+        Location: 匹配的门店。
 
     Raises:
-        Location.DoesNotExist: 地点不存在或不属于租户。
+        Location.DoesNotExist: 门店不存在。
     """
-    return Location.objects.get(tenant=tenant, id=location_id)
+    return Location.objects.get(id=location_id)
 
 
-def catalog_location_list_for_tenant(*, tenant: Tenant) -> list[Location]:
-    """列出租户下的服务地点，按名称排序。
+def catalog_location_list_paginated(
+    *,
+    page: int = 1,
+    page_size: int = DEFAULT_CATALOG_PAGE_SIZE,
+    q: str = "",
+    active_only: bool = False,
+) -> CatalogListResult[Location]:
+    """分页列出门店，按名称排序。
 
     Args:
-        tenant (Tenant): 目标租户。
+        page (int): 页码，从 1 开始。
+        page_size (int): 每页条数。
+        q (str): 搜索关键词，匹配名称与地址。
+        active_only (bool): 是否仅返回启用门店。
 
     Returns:
-        list[Location]: 服务地点列表（含 ``resource_count`` 注解）。
+        CatalogListResult[Location]: 分页结果。
     """
-    return list(
-        Location.objects.filter(tenant=tenant)
-        .annotate(
-            resource_count=Count("resources", distinct=True),
-            service_count=Count("services", distinct=True),
-        )
-        .order_by("name"),
-    )
+    queryset = Location.objects.all()
+    if active_only:
+        queryset = queryset.filter(is_active=True)
+    if q:
+        queryset = queryset.filter(Q(name__icontains=q) | Q(address__icontains=q))
 
+    queryset = queryset.annotate(
+        stylist_count=Count("stylists", distinct=True),
+        service_count=Count("stylists__services", distinct=True),
+    ).order_by("name")
 
-def catalog_location_list_active_for_tenant(*, tenant: Tenant) -> list[Location]:
-    """列出租户下启用的服务地点。
-
-    Args:
-        tenant (Tenant): 目标租户。
-
-    Returns:
-        list[Location]: 启用的服务地点列表。
-    """
-    return list(
-        Location.objects.filter(tenant=tenant, is_active=True).order_by("name"),
-    )
+    total = queryset.count()
+    offset = (page - 1) * page_size
+    items = list(queryset[offset : offset + page_size])
+    return CatalogListResult(items=items, total=total)
 
 
 def catalog_location_to_dict(*, location: Location) -> dict[str, object]:
-    """将 Location 实例映射为 API 响应字典。
+    """将 Location 实例映射为后台 API 响应字典。
 
     Args:
-        location (Location): 服务地点实例。
+        location (Location): 门店实例。
 
     Returns:
-        dict[str, object]: 含 id、name、resource_count 等字段的字典。
+        dict[str, object]: 含 id、name、stylist_count 等字段的字典。
     """
-    resource_count = getattr(location, "resource_count", None)
-    if resource_count is None:
-        resource_count = location.resources.count()
+    stylist_count = getattr(location, "stylist_count", None)
+    if stylist_count is None:
+        stylist_count = location.stylists.count()
     service_count = getattr(location, "service_count", None)
     if service_count is None:
-        service_count = location.services.count()
+        service_count = Service.objects.filter(stylist__location_id=location.id).count()
 
     return {
         "id": location.id,
         "name": location.name,
         "address": location.address,
         "is_active": location.is_active,
-        "resource_count": resource_count,
+        "stylist_count": stylist_count,
         "service_count": service_count,
         "created_at": location.created_at,
         "updated_at": location.updated_at,
     }
 
 
-def catalog_service_get_for_location(
-    *,
-    tenant: Tenant,
-    location: Location,
-    service_id: int,
-) -> Service:
-    """按 ID 查询指定地点下的服务项目。
+def catalog_public_location_to_dict(*, location: Location) -> dict[str, object]:
+    """将启用门店映射为公开 API 响应字典。
 
     Args:
-        tenant (Tenant): 目标租户。
-        location (Location): 所属地点。
+        location (Location): 门店实例。
+
+    Returns:
+        dict[str, object]: 公开可见字段字典。
+    """
+    return {
+        "id": location.id,
+        "name": location.name,
+        "address": location.address,
+    }
+
+
+def catalog_stylist_get_for_location(*, location: Location, stylist_id: int) -> Stylist:
+    """按 ID 查询指定门店下的理发师。
+
+    Args:
+        location (Location): 所属门店。
+        stylist_id (int): 理发师 ID。
+
+    Returns:
+        Stylist: 匹配的理发师。
+
+    Raises:
+        Stylist.DoesNotExist: 理发师不存在或不属于该门店。
+    """
+    return Stylist.objects.get(location=location, id=stylist_id)
+
+
+def catalog_stylist_get(*, stylist_id: int) -> Stylist:
+    """按 ID 查询理发师。
+
+    Args:
+        stylist_id (int): 理发师 ID。
+
+    Returns:
+        Stylist: 匹配的理发师。
+
+    Raises:
+        Stylist.DoesNotExist: 理发师不存在。
+    """
+    return Stylist.objects.select_related("location").get(id=stylist_id)
+
+
+def catalog_stylist_list_for_location_paginated(
+    *,
+    location: Location,
+    page: int = 1,
+    page_size: int = DEFAULT_CATALOG_PAGE_SIZE,
+    q: str = "",
+    active_only: bool = False,
+) -> CatalogListResult[Stylist]:
+    """分页列出指定门店下的理发师，按名称排序。
+
+    Args:
+        location (Location): 所属门店。
+        page (int): 页码，从 1 开始。
+        page_size (int): 每页条数。
+        q (str): 搜索关键词，匹配名称与取号前缀。
+        active_only (bool): 是否仅返回启用理发师。
+
+    Returns:
+        CatalogListResult[Stylist]: 分页结果。
+    """
+    queryset = Stylist.objects.filter(location=location)
+    if active_only:
+        queryset = queryset.filter(is_active=True)
+    if q:
+        queryset = queryset.filter(Q(name__icontains=q) | Q(ticket_prefix__icontains=q))
+
+    queryset = queryset.annotate(
+        service_count=Count("services", distinct=True),
+    ).order_by("name")
+
+    total = queryset.count()
+    offset = (page - 1) * page_size
+    items = list(queryset[offset : offset + page_size])
+    return CatalogListResult(items=items, total=total)
+
+
+def catalog_stylist_to_dict(*, stylist: Stylist) -> dict[str, object]:
+    """将 Stylist 实例映射为后台 API 响应字典。
+
+    Args:
+        stylist (Stylist): 理发师实例。
+
+    Returns:
+        dict[str, object]: 含 id、name、queue_status 等字段的字典。
+    """
+    service_count = getattr(stylist, "service_count", None)
+    if service_count is None:
+        service_count = stylist.services.count()
+
+    return {
+        "id": stylist.id,
+        "name": stylist.name,
+        "location_id": stylist.location_id,
+        "ticket_prefix": stylist.ticket_prefix,
+        "queue_status": stylist.queue_status,
+        "is_active": stylist.is_active,
+        "service_count": service_count,
+        "created_at": stylist.created_at,
+        "updated_at": stylist.updated_at,
+    }
+
+
+def catalog_public_stylist_to_dict(*, stylist: Stylist) -> dict[str, object]:
+    """将启用理发师映射为公开 API 响应字典。
+
+    Args:
+        stylist (Stylist): 理发师实例。
+
+    Returns:
+        dict[str, object]: 公开可见字段字典。
+    """
+    return {
+        "id": stylist.id,
+        "name": stylist.name,
+        "ticket_prefix": stylist.ticket_prefix,
+        "queue_status": stylist.queue_status,
+    }
+
+
+def catalog_public_service_to_dict(*, service: Service) -> dict[str, object]:
+    """将启用服务映射为公开 API 响应字典。
+
+    Args:
+        service (Service): 服务项目实例。
+
+    Returns:
+        dict[str, object]: 公开可见字段字典。
+    """
+    return {
+        "id": service.id,
+        "name": service.name,
+        "description": service.description,
+        "duration_minutes": service.duration_minutes,
+        "price_cents": service.price_cents,
+        "currency": service.currency,
+        "stylist_id": service.stylist_id,
+    }
+
+
+def catalog_service_get_for_stylist(*, stylist: Stylist, service_id: int) -> Service:
+    """按 ID 查询指定理发师下的服务项目。
+
+    Args:
+        stylist (Stylist): 所属理发师。
         service_id (int): 服务 ID。
 
     Returns:
         Service: 匹配的服务项目。
 
     Raises:
-        Service.DoesNotExist: 服务不存在或不属于该地点。
+        Service.DoesNotExist: 服务不存在或不属于该理发师。
     """
-    return Service.objects.get(tenant=tenant, location=location, id=service_id)
+    return Service.objects.get(stylist=stylist, id=service_id)
 
 
-def catalog_service_list_for_location(*, location: Location) -> list[Service]:
-    """列出指定地点下的服务项目，按名称排序。
+def catalog_service_list_for_stylist_paginated(
+    *,
+    stylist: Stylist,
+    page: int = 1,
+    page_size: int = DEFAULT_CATALOG_PAGE_SIZE,
+    q: str = "",
+    active_only: bool = False,
+) -> CatalogListResult[Service]:
+    """分页列出指定理发师下的服务项目，按名称排序。
 
     Args:
-        location (Location): 服务地点。
+        stylist (Stylist): 所属理发师。
+        page (int): 页码，从 1 开始。
+        page_size (int): 每页条数。
+        q (str): 搜索关键词，匹配名称与说明。
+        active_only (bool): 是否仅返回启用服务。
 
     Returns:
-        list[Service]: 服务项目列表。
+        CatalogListResult[Service]: 分页结果。
     """
-    return list(
-        Service.objects.filter(location=location).prefetch_related("resources").order_by("name"),
-    )
+    queryset = Service.objects.filter(stylist=stylist)
+    if active_only:
+        queryset = queryset.filter(is_active=True)
+    if q:
+        queryset = queryset.filter(Q(name__icontains=q) | Q(description__icontains=q))
 
-
-def catalog_service_list_active_for_tenant(*, tenant: Tenant) -> list[Service]:
-    """列出租户下启用的服务项目。
-
-    Args:
-        tenant (Tenant): 目标租户。
-
-    Returns:
-        list[Service]: 启用的服务项目列表。
-    """
-    return list(
-        Service.objects.filter(tenant=tenant, is_active=True)
-        .prefetch_related("resources__location")
-        .order_by("name"),
-    )
+    queryset = queryset.order_by("name")
+    total = queryset.count()
+    offset = (page - 1) * page_size
+    items = list(queryset[offset : offset + page_size])
+    return CatalogListResult(items=items, total=total)
 
 
 def catalog_service_to_dict(*, service: Service) -> dict[str, object]:
@@ -141,7 +320,7 @@ def catalog_service_to_dict(*, service: Service) -> dict[str, object]:
         service (Service): 服务项目实例。
 
     Returns:
-        dict[str, object]: 含 id、name、resource_ids 等字段的字典。
+        dict[str, object]: 含 id、name、stylist_id 等字段的字典。
     """
     return {
         "id": service.id,
@@ -151,97 +330,7 @@ def catalog_service_to_dict(*, service: Service) -> dict[str, object]:
         "price_cents": service.price_cents,
         "currency": service.currency,
         "is_active": service.is_active,
-        "location_id": service.location_id,
-        "resource_ids": list(service.resources.values_list("id", flat=True)),
+        "stylist_id": service.stylist_id,
         "created_at": service.created_at,
         "updated_at": service.updated_at,
-    }
-
-
-def catalog_resource_get_for_location(
-    *,
-    tenant: Tenant,
-    location: Location,
-    resource_id: int,
-) -> Resource:
-    """按 ID 查询指定地点下的可预约资源。
-
-    Args:
-        tenant (Tenant): 目标租户。
-        location (Location): 所属地点。
-        resource_id (int): 资源 ID。
-
-    Returns:
-        Resource: 匹配的资源。
-
-    Raises:
-        Resource.DoesNotExist: 资源不存在或不属于该地点。
-    """
-    return Resource.objects.get(tenant=tenant, location=location, id=resource_id)
-
-
-def catalog_resource_list_for_location(*, location: Location) -> list[Resource]:
-    """列出指定地点下的可预约资源，按名称排序。
-
-    Args:
-        location (Location): 服务地点。
-
-    Returns:
-        list[Resource]: 资源列表。
-    """
-    return list(Resource.objects.filter(location=location).order_by("name"))
-
-
-def catalog_resource_to_dict(*, resource: Resource) -> dict[str, object]:
-    """将 Resource 实例映射为 API 响应字典。
-
-    Args:
-        resource (Resource): 可预约资源实例。
-
-    Returns:
-        dict[str, object]: 含 id、name、location_id 等字段的字典。
-    """
-    return {
-        "id": resource.id,
-        "name": resource.name,
-        "location_id": resource.location_id,
-        "is_active": resource.is_active,
-        "created_at": resource.created_at,
-        "updated_at": resource.updated_at,
-    }
-
-
-def catalog_public_location_to_dict(*, location: Location) -> dict[str, object]:
-    """将启用地点映射为公开目录响应字典。
-
-    Args:
-        location (Location): 服务地点实例。
-
-    Returns:
-        dict[str, object]: 公开可见字段字典。
-    """
-    return {
-        "id": location.id,
-        "name": location.name,
-        "address": location.address,
-    }
-
-
-def catalog_public_service_to_dict(*, service: Service) -> dict[str, object]:
-    """将启用服务映射为公开目录响应字典。
-
-    Args:
-        service (Service): 服务项目实例。
-
-    Returns:
-        dict[str, object]: 公开可见字段字典。
-    """
-    return {
-        "id": service.id,
-        "name": service.name,
-        "description": service.description,
-        "duration_minutes": service.duration_minutes,
-        "price_cents": service.price_cents,
-        "currency": service.currency,
-        "location_id": service.location_id,
     }

@@ -3,9 +3,8 @@ from appointly.api.openapi import enveloped_response_serializer
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.exceptions import NotFound
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
-from tenants.permissions import RequiresTenantCustomer
-from tenants.views import TenantContextMixin
 
 from notifications.models import Notification
 from notifications.selectors import notification_list_for_user
@@ -35,14 +34,16 @@ def _notification_to_dict(notification) -> dict:
         "notification_type": notification.notification_type,
         "title": notification.title,
         "body": notification.body,
-        "booking_id": notification.booking_id,
+        "queue_ticket_id": notification.queue_ticket_id,
         "read_at": notification.read_at,
         "created_at": notification.created_at,
     }
 
 
-class NotificationListView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantCustomer]
+class NotificationListView(APIView):
+    """站内通知列表。"""
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
         summary="列出当前用户的站内通知",
@@ -50,7 +51,7 @@ class NotificationListView(TenantContextMixin, APIView):
         responses={200: enveloped_response_serializer(NotificationListResponseSerializer)},
     )
     def get(self, request, *args, **kwargs):
-        """返回当前客户在租户下的分页站内通知列表。
+        """返回当前用户的分页站内通知列表。
 
         Args:
             request: DRF 请求对象。
@@ -58,13 +59,11 @@ class NotificationListView(TenantContextMixin, APIView):
         Returns:
             Response: 分页通知列表 envelope 响应。
         """
-        tenant = self.get_tenant()
         query_serializer = NotificationListQuerySerializer(data=request.query_params)
         query_serializer.is_valid(raise_exception=True)
         validated = query_serializer.validated_data
 
         result = notification_list_for_user(
-            tenant=tenant,
             user=request.user,
             page=validated["page"],
             page_size=validated["page_size"],
@@ -84,11 +83,13 @@ class NotificationListView(TenantContextMixin, APIView):
         return api_response(request, data=response_serializer.data)
 
 
-class NotificationMarkReadView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantCustomer]
+class NotificationMarkReadView(APIView):
+    """标记单条通知已读。"""
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary="将单条通知标记为已读",
+        summary="标记通知已读",
         responses={200: enveloped_response_serializer(NotificationListItemResponseSerializer)},
     )
     def patch(self, request, notification_id: int, *args, **kwargs):
@@ -99,43 +100,34 @@ class NotificationMarkReadView(TenantContextMixin, APIView):
             notification_id (int): 通知 ID。
 
         Returns:
-            Response: 更新后的通知 envelope 响应。
+            Response: 更新后的通知。
         """
-        tenant = self.get_tenant()
         try:
-            notification = notification_mark_read(
-                tenant=tenant,
-                user=request.user,
-                notification_id=notification_id,
-            )
+            notification = notification_mark_read(user=request.user, notification_id=notification_id)
         except Notification.DoesNotExist as exc:
             raise NotFound("通知不存在。") from exc
-
-        response_serializer = NotificationListItemResponseSerializer(
-            _notification_to_dict(notification)
-        )
+        response_serializer = NotificationListItemResponseSerializer(_notification_to_dict(notification))
         return api_response(request, data=response_serializer.data)
 
 
-class NotificationReadAllView(TenantContextMixin, APIView):
-    permission_classes = [RequiresTenantCustomer]
+class NotificationReadAllView(APIView):
+    """全部标记已读。"""
+
+    permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary="将全部通知标记为已读",
+        summary="全部标记已读",
         responses={200: enveloped_response_serializer(NotificationReadAllResponseSerializer)},
     )
     def post(self, request, *args, **kwargs):
-        """将当前用户在租户下的全部未读通知标记为已读。
+        """将当前用户全部未读通知标记为已读。
 
         Args:
             request: DRF 请求对象。
 
         Returns:
-            Response: 含标记数量的 envelope 响应。
+            Response: 标记数量 envelope 响应。
         """
-        tenant = self.get_tenant()
-        marked_count = notification_mark_all_read(tenant=tenant, user=request.user)
-        response_serializer = NotificationReadAllResponseSerializer(
-            {"marked_count": marked_count}
-        )
+        marked_count = notification_mark_all_read(user=request.user)
+        response_serializer = NotificationReadAllResponseSerializer({"marked_count": marked_count})
         return api_response(request, data=response_serializer.data, status=status.HTTP_200_OK)

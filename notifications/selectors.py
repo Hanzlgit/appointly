@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 from django.contrib.auth.models import User
 from django.db.models import Q
-from tenants.models import Tenant
 
 from notifications.models import Notification
 
@@ -20,26 +19,20 @@ class NotificationListResult:
     unread_count: int
 
 
-def notification_unread_count_for_user(*, tenant: Tenant, user: User) -> int:
-    """统计用户在租户下的未读通知数。
+def notification_unread_count_for_user(*, user: User) -> int:
+    """统计用户未读通知数。
 
     Args:
-        tenant (Tenant): 目标租户。
         user (User): 当前用户。
 
     Returns:
         int: 未读通知数量。
     """
-    return Notification.objects.filter(
-        tenant=tenant,
-        recipient=user,
-        read_at__isnull=True,
-    ).count()
+    return Notification.objects.filter(recipient=user, read_at__isnull=True).count()
 
 
 def notification_list_for_user(
     *,
-    tenant: Tenant,
     user: User,
     page: int = 1,
     page_size: int = 10,
@@ -47,10 +40,9 @@ def notification_list_for_user(
     unread_only: bool = False,
     notification_type: str = "",
 ) -> NotificationListResult:
-    """分页列出用户在租户下的站内通知。
+    """分页列出用户的站内通知。
 
     Args:
-        tenant (Tenant): 目标租户。
         user (User): 当前用户。
         page (int): 页码，从 1 开始。
         page_size (int): 每页条数。
@@ -61,7 +53,7 @@ def notification_list_for_user(
     Returns:
         NotificationListResult: 分页结果与未读总数。
     """
-    queryset = Notification.objects.filter(tenant=tenant, recipient=user).select_related("booking")
+    queryset = Notification.objects.filter(recipient=user).select_related("queue_ticket")
 
     if unread_only:
         queryset = queryset.filter(read_at__isnull=True)
@@ -70,7 +62,7 @@ def notification_list_for_user(
     if q:
         queryset = queryset.filter(Q(title__icontains=q) | Q(body__icontains=q))
 
-    unread_count = notification_unread_count_for_user(tenant=tenant, user=user)
+    unread_count = notification_unread_count_for_user(user=user)
     total = queryset.count()
     offset = (page - 1) * page_size
     items = list(queryset[offset : offset + page_size])

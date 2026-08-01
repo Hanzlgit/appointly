@@ -8,11 +8,6 @@ class OutboxEvent(models.Model):
     """事务性 Outbox 事件，与业务操作同事务写入。"""
 
     event_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
-    tenant = models.ForeignKey(
-        "tenants.Tenant",
-        on_delete=models.CASCADE,
-        related_name="outbox_events",
-    )
     event_type = models.CharField(max_length=64)
     aggregate_type = models.CharField(max_length=32)
     aggregate_id = models.PositiveBigIntegerField()
@@ -51,11 +46,6 @@ class ProcessedEvent(models.Model):
 class Notification(models.Model):
     """用户站内通知。"""
 
-    tenant = models.ForeignKey(
-        "tenants.Tenant",
-        on_delete=models.CASCADE,
-        related_name="notifications",
-    )
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -64,8 +54,8 @@ class Notification(models.Model):
     notification_type = models.CharField(max_length=64)
     title = models.CharField(max_length=255)
     body = models.TextField()
-    booking = models.ForeignKey(
-        "scheduling.Booking",
+    queue_ticket = models.ForeignKey(
+        "queuing.QueueTicket",
         on_delete=models.CASCADE,
         null=True,
         blank=True,

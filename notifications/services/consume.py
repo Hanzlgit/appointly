@@ -61,25 +61,23 @@ def _notifications_handle_event(
         return
 
     recipient = User.objects.get(pk=recipient_user_id)
-    booking_id = payload.get("booking_id")
-    booking = None
-    if booking_id is not None:
-        from scheduling.models import Booking
+    queue_ticket = None
+    queue_ticket_id = payload.get("queue_ticket_id")
+    if queue_ticket_id is not None:
+        from queuing.models import QueueTicket
 
-        booking = Booking.objects.filter(pk=booking_id).first()
+        queue_ticket = QueueTicket.objects.filter(pk=queue_ticket_id).first()
 
     notification_create(
-        tenant_id=payload["tenant_id"],
         recipient=recipient,
         notification_type=event_type,
         title=payload.get("title", ""),
         body=payload.get("body", ""),
-        booking=booking,
+        queue_ticket=queue_ticket,
         source_event_id=event_id,
     )
 
-    phone = payload.get("phone", "")
+    phone = payload.get("phone")
     if phone:
-        sms = sms_adapter_get()
-        if hasattr(sms, "send_booking_notification"):
-            sms.send_booking_notification(phone=phone, message=payload.get("body", ""))
+        adapter = sms_adapter_get()
+        adapter.send(to=phone, body=payload.get("body", ""))

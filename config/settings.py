@@ -93,6 +93,7 @@ INSTALLED_APPS = [
     "tenants.apps.TenantsConfig",
     "catalog.apps.CatalogConfig",
     "scheduling.apps.SchedulingConfig",
+    "queuing.apps.QueuingConfig",
     "notifications.apps.NotificationsConfig",
     "audit.apps.AuditConfig",
 ]

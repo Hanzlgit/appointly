@@ -34,7 +34,7 @@ class NotificationListItemResponseSerializer(serializers.Serializer):
     notification_type = serializers.CharField()
     title = serializers.CharField()
     body = serializers.CharField()
-    booking_id = serializers.IntegerField(allow_null=True)
+    queue_ticket_id = serializers.IntegerField(allow_null=True)
     read_at = serializers.DateTimeField(allow_null=True)
     created_at = serializers.DateTimeField()
 

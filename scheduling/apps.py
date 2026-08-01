@@ -6,6 +6,4 @@ class SchedulingConfig(AppConfig):
     name = "scheduling"
     verbose_name = "排班与时段"
 
-    def ready(self) -> None:
-        """注册排班应用信号处理器。"""
-        import scheduling.signals  # noqa: F401
+    # scheduling 已退役；保留 AppConfig 供历史迁移加载，不注册信号。

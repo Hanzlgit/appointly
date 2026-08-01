@@ -129,7 +129,7 @@ class CustomerSessionCreateView(APIView):
 
     @extend_schema(
         summary="客户验证码登录",
-        description="校验验证码并签发 JWT；首次验证自动创建平台账号，并确保租户客户档案存在。",
+        description="校验验证码并签发 JWT；首次验证自动创建平台账号。",
         request=CustomerSessionCreateRequestSerializer,
         responses={200: enveloped_response_serializer(CustomerSessionCreateResponseSerializer)},
         examples=[
@@ -138,7 +138,6 @@ class CustomerSessionCreateView(APIView):
                 value={
                     "phone": "13900139000",
                     "code": "123456",
-                    "tenant_slug": "acme",
                 },
                 request_only=True,
             ),
@@ -161,7 +160,6 @@ class CustomerSessionCreateView(APIView):
             user = customer_authenticate(
                 phone=validated_data["phone"],
                 code=validated_data["code"],
-                tenant_slug=validated_data["tenant_slug"],
             )
         except DjangoValidationError as exc:
             _raise_validation_error(exc)
