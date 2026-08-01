@@ -422,9 +422,96 @@ class InAppNotificationRecipientTests(APITestCase):
         response = self.client.get("/api/v1/acme/notifications/")
         from tests.support import api_data
 
-        items = api_data(response)
-        self.assertGreaterEqual(len(items), 1)
-        self.assertEqual(items[0]["notification_type"], "booking.confirmed")
+        payload = api_data(response)
+        self.assertGreaterEqual(payload["total"], 1)
+        self.assertGreaterEqual(len(payload["items"]), 1)
+        self.assertEqual(payload["items"][0]["notification_type"], "booking.confirmed")
+        self.assertGreaterEqual(payload["unread_count"], 1)
+
+    def test_notification_list_supports_pagination_and_filters(self):
+        """通知列表支持分页、搜索、未读筛选与类型筛选。"""
+        from notifications.models import Notification
+        from notifications.services.notification import notification_create
+
+        notification_create(
+            tenant_id=self.tenant.id,
+            recipient=self.customer_user,
+            notification_type="booking.confirmed",
+            title="预约已确认",
+            body="您的 Haircut 预约已确认。",
+        )
+        notification_create(
+            tenant_id=self.tenant.id,
+            recipient=self.customer_user,
+            notification_type="booking.cancelled",
+            title="预约已取消",
+            body="您的 Haircut 预约已取消。",
+        )
+        unread = notification_create(
+            tenant_id=self.tenant.id,
+            recipient=self.customer_user,
+            notification_type="booking.reminder",
+            title="预约提醒",
+            body="您有即将开始的 Haircut 预约，请准时到场。",
+        )
+        Notification.objects.filter(pk=unread.pk).update(read_at=timezone.now())
+
+        from tests.support import api_data
+
+        paginated = api_data(self.client.get("/api/v1/acme/notifications/?page=1&page_size=1"))
+        self.assertEqual(paginated["page"], 1)
+        self.assertEqual(paginated["page_size"], 1)
+        self.assertEqual(paginated["total"], 3)
+        self.assertEqual(len(paginated["items"]), 1)
+
+        searched = api_data(self.client.get("/api/v1/acme/notifications/?q=取消"))
+        self.assertEqual(searched["total"], 1)
+        self.assertEqual(searched["items"][0]["notification_type"], "booking.cancelled")
+
+        unread_only = api_data(self.client.get("/api/v1/acme/notifications/?unread_only=true"))
+        self.assertEqual(unread_only["total"], 2)
+
+        typed = api_data(self.client.get("/api/v1/acme/notifications/?type=booking.confirmed"))
+        self.assertEqual(typed["total"], 1)
+        self.assertEqual(typed["items"][0]["notification_type"], "booking.confirmed")
+
+    def test_notification_mark_read_and_read_all(self):
+        """客户可标记单条或全部通知为已读。"""
+        from notifications.services.notification import notification_create
+
+        first = notification_create(
+            tenant_id=self.tenant.id,
+            recipient=self.customer_user,
+            notification_type="booking.confirmed",
+            title="预约已确认",
+            body="第一条",
+        )
+        notification_create(
+            tenant_id=self.tenant.id,
+            recipient=self.customer_user,
+            notification_type="booking.cancelled",
+            title="预约已取消",
+            body="第二条",
+        )
+
+        from tests.support import api_data
+
+        marked = api_data(
+            self.client.patch(f"/api/v1/acme/notifications/{first.id}/read/")
+        )
+        self.assertIsNotNone(marked["read_at"])
+
+        list_after_one = api_data(self.client.get("/api/v1/acme/notifications/"))
+        self.assertEqual(list_after_one["unread_count"], 1)
+
+        read_all = api_data(self.client.post("/api/v1/acme/notifications/read-all/"))
+        self.assertEqual(read_all["marked_count"], 1)
+
+        list_after_all = api_data(
+            self.client.get("/api/v1/acme/notifications/?unread_only=true")
+        )
+        self.assertEqual(list_after_all["total"], 0)
+        self.assertEqual(list_after_all["unread_count"], 0)
 
 
 @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
