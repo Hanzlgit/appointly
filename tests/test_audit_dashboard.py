@@ -296,6 +296,37 @@ class AuditDashboardTests(APITestCase):
         self.assertEqual(summary["confirmed"], 1)
         self.assertEqual(summary["completed"], 1)
 
+    def test_dashboard_returns_upcoming_status_summary(self):
+        """看板返回今日起各状态预约数量。"""
+        tenant_tz = ZoneInfo("Asia/Shanghai")
+        future_start = datetime(2026, 8, 3, 9, 0, tzinfo=tenant_tz).astimezone(UTC)
+        future_end = datetime(2026, 8, 3, 10, 0, tzinfo=tenant_tz).astimezone(UTC)
+        future_slot = TimeSlot.objects.create(
+            tenant=self.tenant,
+            location=self.location,
+            resource=self.resource,
+            start=future_start,
+            end=future_end,
+            capacity=2,
+        )
+        booking_create_for_test(
+            tenant=self.tenant,
+            time_slot=future_slot,
+            service=self.service,
+            customer=self.customer,
+            status=BookingStatus.CONFIRMED,
+            idempotency_key="dash-upcoming",
+        )
+        self._as_admin()
+        response = self.client.get(
+            "/api/v1/acme/dashboard/summary/",
+            {"date": "2026-07-26"},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = api_data(response)
+        self.assertEqual(data["today_summary"]["confirmed"], 0)
+        self.assertEqual(data["upcoming_summary"]["confirmed"], 1)
+
     def test_dashboard_seven_day_trend_counts_future_bookings(self):
         """看板返回未来七天预约趋势。"""
         tenant_tz = ZoneInfo("Asia/Shanghai")

@@ -11,7 +11,7 @@ from django.db.models.functions import TruncDate
 from scheduling.models import Booking, BookingStatus, TimeSlot
 from tenants.models import Tenant
 
-from audit.constants import DASHBOARD_CACHE_TTL_SECONDS
+from audit.constants import DASHBOARD_CACHE_TTL_SECONDS, DASHBOARD_TREND_DAYS
 
 
 def _dashboard_parse_reference_date(*, tenant: Tenant, reference_date: str | None) -> date:
@@ -63,7 +63,27 @@ def _dashboard_cache_key(
         str: Redis 缓存键。
     """
     location_part = location_id if location_id is not None else "all"
-    return f"audit:dashboard:{tenant_id}:{reference_date.isoformat()}:{location_part}"
+    return f"audit:dashboard:v2:{tenant_id}:{reference_date.isoformat()}:{location_part}"
+
+
+def _dashboard_status_summary(*, queryset) -> dict:
+    """按预约状态聚合计数。
+
+    Args:
+        queryset: 预约 QuerySet。
+
+    Returns:
+        dict: 各状态数量。
+    """
+    status_counts = queryset.values("status").annotate(count=Count("id"))
+    status_map = {row["status"]: row["count"] for row in status_counts}
+    return {
+        "pending": status_map.get(BookingStatus.PENDING, 0),
+        "confirmed": status_map.get(BookingStatus.CONFIRMED, 0),
+        "completed": status_map.get(BookingStatus.COMPLETED, 0),
+        "cancelled": status_map.get(BookingStatus.CANCELLED, 0),
+        "no_show": status_map.get(BookingStatus.NO_SHOW, 0),
+    }
 
 
 def dashboard_summary_compute(
@@ -91,18 +111,18 @@ def dashboard_summary_compute(
     if location_id is not None:
         bookings_today = bookings_today.filter(time_slot__location_id=location_id)
 
-    status_counts = bookings_today.values("status").annotate(count=Count("id"))
-    status_map = {row["status"]: row["count"] for row in status_counts}
-    today_summary = {
-        "pending": status_map.get(BookingStatus.PENDING, 0),
-        "confirmed": status_map.get(BookingStatus.CONFIRMED, 0),
-        "completed": status_map.get(BookingStatus.COMPLETED, 0),
-        "cancelled": status_map.get(BookingStatus.CANCELLED, 0),
-        "no_show": status_map.get(BookingStatus.NO_SHOW, 0),
-    }
+    today_summary = _dashboard_status_summary(queryset=bookings_today)
+
+    bookings_upcoming = Booking.objects.filter(
+        tenant=tenant,
+        time_slot__start__gte=day_start,
+    )
+    if location_id is not None:
+        bookings_upcoming = bookings_upcoming.filter(time_slot__location_id=location_id)
+    upcoming_summary = _dashboard_status_summary(queryset=bookings_upcoming)
 
     trend_start = day_start
-    trend_end = day_start + timedelta(days=7)
+    trend_end = day_start + timedelta(days=DASHBOARD_TREND_DAYS)
     trend_bookings = Booking.objects.filter(
         tenant=tenant,
         time_slot__start__gte=trend_start,
@@ -222,6 +242,7 @@ def dashboard_summary_compute(
     return {
         "reference_date": reference_date,
         "today_summary": today_summary,
+        "upcoming_summary": upcoming_summary,
         "seven_day_trend": seven_day_trend,
         "bookings_by_location": bookings_by_location,
         "resource_utilization": resource_utilization,

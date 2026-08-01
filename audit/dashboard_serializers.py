@@ -49,6 +49,7 @@ class DashboardSummaryResponseSerializer(serializers.Serializer):
 
     reference_date = serializers.DateField()
     today_summary = DashboardStatusSummarySerializer()
+    upcoming_summary = DashboardStatusSummarySerializer()
     seven_day_trend = DashboardTrendPointSerializer(many=True)
     bookings_by_location = DashboardLocationCountSerializer(many=True)
     resource_utilization = DashboardResourceUtilizationSerializer(many=True)
